@@ -671,6 +671,10 @@ input::placeholder,textarea::placeholder{color:var(--muted)}
 .theme-btn{cursor:pointer}
 .theme-fab{position:absolute;top:1rem;left:1rem;z-index:5;background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.3)}
 @media (max-width:860px){.theme-fab{top:.8rem;left:.8rem}}
+html.theme-transition,html.theme-transition *{
+  transition:background .28s ease,background-color .28s ease,color .28s ease,border-color .28s ease,box-shadow .28s ease,fill .28s ease,stroke .28s ease!important;
+}
+@media (prefers-reduced-motion:reduce){html.theme-transition,html.theme-transition *{transition-duration:.01ms!important}}
 
 /* ===== STUDENT: loans table without sideways scroll + rules page ===== */
 .loan-tbl{min-width:0;table-layout:auto}
@@ -678,5 +682,8 @@ input::placeholder,textarea::placeholder{color:var(--muted)}
 .loan-tbl td small{display:block;color:var(--muted)}
 .table-wrap:has(.loan-tbl){overflow-x:hidden}
 @media (max-width:700px){.loan-tbl .c-bor{display:none}}
+.overdue-fine-tracker .table-wrap{overflow-x:hidden}
+.overdue-fine-tracker table{min-width:0;table-layout:fixed}
+.overdue-fine-tracker th,.overdue-fine-tracker td{white-space:normal;overflow-wrap:anywhere;padding:.65rem .5rem}
 .rules-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:1rem}
 .rules-grid .rule{background:var(--card)}.rules-grid .rule.hl{background:var(--brand-50)}

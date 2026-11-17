@@ -270,7 +270,7 @@ function pageDashboard(){
     ${rows.map(r => { const pct = Math.round(r.loans/total*100); return `<tr><td class="cell-l"><b>${r.k}</b><br><small>${r.name}</small></td><td>${r.users}</td><td>${r.students}</td><td>${r.loans}</td><td>${r.overdue}</td><td>₱${r.fines.toFixed(2)}</td>
       <td style="min-width:130px"><div class="bar" role="img" aria-label="${pct}% of active loans"><i style="width:${pct}%"></i></div><small>${pct}%</small></td></tr>`; }).join('')}
     <tr class="tot"><td class="cell-l">All colleges</td><td>${sum('users')}</td><td>${sum('students')}</td><td>${sum('loans')}</td><td>${sum('overdue')}</td><td>₱${sum('fines').toFixed(2)}</td><td></td></tr></tbody></table></div></div>
-  <div class="v-grid"><div class="v-sec"><h3>Overdue Books &amp; Fine Tracker</h3><div class="table-wrap">${!od ? '<div class="empty">No overdue books.</div>' : `<table><thead><tr><th class="cell-l">Student</th><th>College</th><th>Book</th><th>Due Date</th><th>Days</th><th>Fine</th></tr></thead><tbody>
+  <div class="v-grid"><div class="v-sec overdue-fine-tracker"><h3>Overdue Books &amp; Fine Tracker</h3><div class="table-wrap">${!od ? '<div class="empty">No overdue books.</div>' : `<table><thead><tr><th class="cell-l">Student</th><th>College</th><th>Book</th><th>Due Date</th><th>Days</th><th>Fine</th></tr></thead><tbody>
     ${overdue.map(l=>`<tr><td class="cell-l"><b>${esc(l.user.name)}</b><br><small>${l.user.sid}</small></td><td>${esc(l.user.college)}</td><td>${esc(l.book.title)}</td><td>${l.due}</td><td>${l.days}</td><td>₱${l.fine.toFixed(2)}</td></tr>`).join('')}</tbody></table>`}</div></div>
   <div><div class="v-sec"><h3>New Books</h3>${newest.map(b=>`<div class="arr">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ${b.added}</small></div><button class="icon-btn" data-action="viewBook" data-id="${b.id}" aria-label="View ${esc(b.title)}" title="View">${I.view}</button></div>`).join('')||'<p class="muted">No books yet.</p>'}</div>
   <div class="v-sec"><h3>Recent Borrowers</h3>${recent.map(l=>`<div class="arr"><span class="ini">${esc(l.user.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase())}</span><div><b>${esc(l.user.name)}</b><small>${l.user.sid}</small></div>${stBadge(l)}</div>`).join('')||'<p class="muted">No loans yet.</p>'}</div></div></div>`;
@@ -1320,9 +1320,13 @@ NAV_ICON.rules = 'rules';
 const themeNow = () => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
 const themeBtn = (cls = '') => { const d = themeNow() === 'dark'; return `<button class="tb-btn theme-btn ${cls}" data-action="toggleTheme" aria-label="Switch to ${d ? 'light' : 'dark'} mode" title="Switch to ${d ? 'light' : 'dark'} mode">${d ? I.sun : I.moon}</button>`; };
 function setTheme(t){      // updates in place: no re-render, so nothing typed is lost
-  document.documentElement.dataset.theme = t; try { localStorage.setItem('librio-theme', t); } catch(e) {}
+  const root = document.documentElement;
+  root.classList.add('theme-transition');
+  root.dataset.theme = t; try { localStorage.setItem('librio-theme', t); } catch(e) {}
   document.querySelectorAll('.theme-btn').forEach(b => { const d = t === 'dark'; b.innerHTML = d ? I.sun : I.moon; b.setAttribute('aria-label', `Switch to ${d ? 'light' : 'dark'} mode`); b.title = `Switch to ${d ? 'light' : 'dark'} mode`; });
   document.querySelectorAll('[data-action="setTheme"]').forEach(b => b.setAttribute('aria-pressed', b.dataset.theme === t));
+  clearTimeout(setTheme.timer);
+  setTheme.timer = setTimeout(() => root.classList.remove('theme-transition'), 300);
 }
 const themeSeg = () => `<div class="seg" role="group" aria-label="Theme">${['light','dark'].map(k => `<button data-action="setTheme" data-theme="${k}" aria-pressed="${themeNow() === k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>`;
 Object.assign(ACTIONS, {toggleTheme(){ setTheme(themeNow() === 'dark' ? 'light' : 'dark'); }, setTheme(el){ setTheme(el.dataset.theme); }});
