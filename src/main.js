@@ -338,12 +338,12 @@ function historyPanel(uid, canReturn){
   const stats = [[act.length,'Active loans'],[ret.length,'Returned'],[late,'Returned late'],['₱' + fines.toFixed(2),'Fines incurred']];
   const by = l => l.by ? `<br><small>Issued by ${esc(l.by)}</small>` : '';
   const activeTbl = !act.length ? '<div class="empty">No books are currently borrowed.</div>'
-    : `<div class="table-wrap"><table><thead><tr><th class="cell-l">Book</th><th>Borrowed</th><th>Due</th><th>Status</th><th>Fine</th>${canReturn ? '<th>Return</th>' : ''}</tr></thead><tbody>
-    ${act.map(l => `<tr><td class="cell-l"><b>${esc(l.book.title)}</b>${by(l)}</td><td>${l.borrowed}</td><td>${l.due}</td><td><span class="badge ${stCls(l)}">${stLabel(l)}</span></td><td>₱${l.fine.toFixed(2)}</td>
-      ${canReturn ? `<td><button class="btn ok sm" data-action="returnLoan" data-id="${l.id}" aria-label="Mark ${esc(l.book.title)} as returned">Mark returned</button></td>` : ''}</tr>`).join('')}</tbody></table></div>`;
+    : `<div class="table-wrap"><table class="loan-tbl hist-tbl"><thead><tr><th class="cell-l c-book">Book</th><th class="c-bor c-date">Borrowed</th><th class="c-date">Due</th><th class="c-stat">Status</th><th class="c-fine">Fine</th>${canReturn ? '<th class="c-act">Return</th>' : ''}</tr></thead><tbody>
+    ${act.map(l => `<tr><td class="cell-l c-book"><b>${esc(l.book.title)}</b>${by(l)}</td><td class="c-bor c-date">${l.borrowed}</td><td class="c-date">${l.due}</td><td class="c-stat"><span class="badge ${stCls(l)}">${stLabel(l)}</span></td><td class="c-fine">₱${l.fine.toFixed(2)}</td>
+      ${canReturn ? `<td class="c-act"><button class="btn ok sm" data-action="returnLoan" data-id="${l.id}" aria-label="Mark ${esc(l.book.title)} as returned">Mark returned</button></td>` : ''}</tr>`).join('')}</tbody></table></div>`;
   const retTbl = !ret.length ? '<div class="empty">No returned books yet.</div>'
-    : `<div class="table-wrap"><table><thead><tr><th class="cell-l">Book</th><th>Borrowed</th><th>Due</th><th>Returned</th><th>Status</th><th>Fine</th></tr></thead><tbody>
-    ${ret.map(l => `<tr><td class="cell-l"><b>${esc(l.book.title)}</b>${by(l)}</td><td>${l.borrowed}</td><td>${l.due}</td><td>${l.returned}</td><td><span class="badge ${l.late ? 'soon' : 'ok'}">${l.late ? 'Returned late' : 'Returned'}</span></td><td>₱${l.fine.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
+    : `<div class="table-wrap"><table class="loan-tbl hist-tbl"><thead><tr><th class="cell-l c-book">Book</th><th class="c-bor c-date">Borrowed</th><th class="c-date">Due</th><th class="c-date">Returned</th><th class="c-stat">Status</th><th class="c-fine">Fine</th></tr></thead><tbody>
+    ${ret.map(l => `<tr><td class="cell-l c-book"><b>${esc(l.book.title)}</b>${by(l)}</td><td class="c-bor c-date">${l.borrowed}</td><td class="c-date">${l.due}</td><td class="c-date">${l.returned}</td><td class="c-stat"><span class="badge ${l.late ? 'soon' : 'ok'}">${l.late ? 'Returned late' : 'Returned'}</span></td><td class="c-fine">₱${l.fine.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
   return `<div class="hist"><div class="stat-strip">${stats.map(([v,l]) => `<div><b>${v}</b><small>${l}</small></div>`).join('')}</div>
     <h3 class="sub-h">Currently borrowed (${act.length})</h3>${activeTbl}<h3 class="sub-h">Returned (${ret.length})</h3>${retTbl}</div>`;
 }
@@ -384,7 +384,7 @@ function pageStudentDash(){
   ${kpiCards(kpi, ['book','clock','alert','wallet'], ['brand','amber','red','slate'])}
   <div class="v-grid"><div class="v-sec"><h3>My Current Loans</h3><div class="table-wrap">${loanTable(L)}</div></div>
   <div class="v-sec"><h3>New Arrivals</h3>${newest.map(b=>`<div class="arr">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ${esc(b.edition||'—')}</small></div><button class="btn pill" data-action="viewBook" data-id="${b.id}">View</button></div>`).join('')}</div></div>
-  <div class="card" style="margin-top:1rem"><h3 style="margin:0 0 .5rem">Borrowing Rules</h3><ul class="check"><li>Loans are fixed at <b>${LOAN_DAYS} days</b> and cannot be extended.</li><li>Up to ${MAX_LOANS} books at a time.</li><li>Late returns cost ₱${FINE_PER_DAY} per day.</li></ul><button class="link" data-action="go" data-key="rules" style="margin-top:.5rem">Read all library rules</button></div>`;
+  <div class="card" style="margin-top:1rem"><h3 style="margin:0 0 .5rem">Borrowing Rules</h3><ul class="check"><li>Loan period: <b>${LOAN_DAYS} Days</b>.</li><li>Up to ${MAX_LOANS} books at a time.</li><li>Late returns cost ₱${FINE_PER_DAY} per day.</li></ul><button class="link" data-action="go" data-key="rules" style="margin-top:.5rem">Read all library rules</button></div>`;
 }
 function pageBrowse(){
   return phead('Browse Books', 'Find a title, check availability and place a hold.', '', 'Search title, author or genre…', 'Search books') + `
@@ -602,7 +602,7 @@ function issueCheck(v){          // Module 3 rules, in flowchart order: borrower
   else if (v.issued > today) e.issued = 'Issue date cannot be in the future';
   else if (v.issued < addFrom(today, -30)) e.issued = 'Issue date cannot be more than 30 days ago';
   if (!v.due) e.due = 'Enter the due date';
-  else if (v.issued && v.due !== addFrom(v.issued, LOAN_DAYS)) e.due = `Loans are fixed at ${LOAN_DAYS} days`;
+  else if (v.issued && v.due !== addFrom(v.issued, LOAN_DAYS)) e.due = `Loan period must be ${LOAN_DAYS} Days`;
   return e;
 }
 function chooseBook(b){ $('#modal-root [name=bookId]').value = b.id; $('#iss-bq').value = b.title; $('#iss-bres').innerHTML = ''; lkSync('iss-bq'); issueRefresh(); }
@@ -926,7 +926,7 @@ const ACTIONS = {
       if (s && p === (s.password || STUDENT_PASSWORD)){ state.role = 'student'; state.studentId = s.id; state.user = s.name; ok = true; }
     } else if (m === 'visitor'){
       if (u.length < 2){ $('#login-err').textContent = 'Please enter your name.'; $('#u').classList.add('bad'); $('#u').setAttribute('aria-describedby', 'login-err'); return; }
-      if (!state.agreed.visitor){ $('#login-err').textContent = 'Please agree to the library rules to enter.'; const c = $('#agree-visitor'); if (c){ c.setAttribute('aria-invalid','true'); c.focus(); } return; }
+      if (!state.agreed.visitor){ $('#login-err').textContent = 'Please read and accept the library rules to enter.'; const c = $('#agree-visitor'); if (c) c.focus(); return; }
       const id = Math.max(0, ...state.visits.map(v => v.id)) + 1;
       state.visits.push({id, name:u, purpose:p, time:addDays(0) + ' ' + new Date().toTimeString().slice(0,5), terms:new Date().toISOString()}); state.agreed = {};
       state.role = 'visitor'; state.user = u; state.visitId = id; save(); ok = true;
@@ -986,7 +986,7 @@ const ACTIONS = {
   checkReg(){ load(); render(); },
   submitReg(){
     if (state.pendingReg) return;
-    const v = readFields('#reg-form'), errs = validateReg(v); if (!state.agreed.student) errs.agree = 'You must agree to the library rules to register.'; showErrors(errs, '#reg-form'); if (Object.keys(errs).length) return;
+    const v = readFields('#reg-form'), errs = validateReg(v); if (!state.agreed.student) errs.agree = 'Please read and accept the library rules to register.'; showErrors(errs, '#reg-form'); if (Object.keys(errs).length) return;
     const id = Math.max(0, ...state.regs.map(r => r.id)) + 1;
     state.regs.push({id, sid:v.sid.trim(), name:v.name.trim(), email:v.email.trim(), college:v.college, password:v.password, date:addDays(0), terms:new Date().toISOString(), status:'Pending'});
     notify('desk', `New student registration: ${v.name.trim()} (${v.sid.trim()}).`, 'registrations'); state.pendingReg = id; state.agreed = {}; save(); render();
@@ -1299,12 +1299,13 @@ document.addEventListener('keydown', e => {          // Enter submits login
 
 /* ===== J. LIBRARY RULES (terms of service) ===== */
 const rulesFor = () => [
-  {ico:'visitors', who:'visitor', t:'Visitors', items:['Visitors may read and study inside the library only.','Visitors cannot borrow books or take them out of the building.','Ask the librarian about a student account if you would like to borrow.']},
-  {ico:'book', who:'student', t:'Students', items:[`Students may borrow up to <b>${MAX_LOANS} books</b> at a time.`,`The loan period is fixed at <b>${LOAN_DAYS} days</b> and cannot be extended.`,'Books are returned at the library desk.']},
-  {ico:'alert', who:'student', t:'Overdue books', items:[`Overdue books are fined <b>₱${FINE_PER_DAY} per day</b>.`,'You cannot borrow again until overdue books are returned.']},
-  {ico:'check', t:'Everyone', items:['Keep quiet, and keep food and drinks outside.','Treat books and library property with care.']}
+  {ico:'visitors', who:'visitor', t:'Visitors', items:['Visitors may read and study <b>inside the library only</b>.','Visitors cannot borrow books or take them out of the building.','Your name, purpose of visit and entry time are recorded in the visitor log.','Ask the librarian about a student account if you would like to borrow.']},
+  {ico:'book', who:'student', t:'Borrowing', items:[`Students may borrow up to <b>${MAX_LOANS} books</b> at a time.`,`The loan period is <b>${LOAN_DAYS} days</b> and cannot be extended.`,'Books are returned at the library desk.','If every copy is out, you can reserve the title and collect it before the pickup deadline.']},
+  {ico:'alert', who:'student', t:'Overdue books', items:[`Overdue books are fined <b>₱${FINE_PER_DAY} per day</b>.`,'You cannot borrow again until overdue books are returned.','Report lost or damaged books to the librarian right away.']},
+  {ico:'user', who:'student', t:'Your account', items:['A librarian verifies every new registration before you can log in.','Keep your password private. You are responsible for activity on your account.']},
+  {ico:'check', t:'Everyone', items:['Keep quiet, and keep food and drinks outside.','Treat books and library property with care.','The time you accept these rules is saved with your registration or visit.']}
 ];
-const ruleCard = (r, k) => `<section class="rule ${r.who === k ? 'hl' : ''}"><h3>${I[r.ico]}${r.t}${r.who === k ? '<span class="badge">Applies to you</span>' : ''}</h3><ul>${r.items.map(x => `<li>${x}</li>`).join('')}</ul></section>`;
+const ruleCard = (r, k) => `<section class="rule ${r.who === k ? 'hl' : ''}"><h3><span class="rule-ico" aria-hidden="true">${I[r.ico]}</span><span class="rule-t">${r.t}</span>${r.who === k ? '<span class="badge">Applies to you</span>' : ''}</h3><ul>${r.items.map(x => `<li>${x}</li>`).join('')}</ul></section>`;
 function pageRules(){
   const k = state.role === 'student' ? 'student' : 'visitor';
   return `<div class="page-head"><div class="ph-t"><h2>Library Rules &amp; Terms</h2><p>What to expect when you use the library.</p></div></div>
@@ -1331,13 +1332,19 @@ function setTheme(t){      // updates in place: no re-render, so nothing typed i
 const themeSeg = () => `<div class="seg" role="group" aria-label="Theme">${['light','dark'].map(k => `<button data-action="setTheme" data-theme="${k}" aria-pressed="${themeNow() === k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>`;
 Object.assign(ACTIONS, {toggleTheme(){ setTheme(themeNow() === 'dark' ? 'light' : 'dark'); }, setTheme(el){ setTheme(el.dataset.theme); }});
 
-const termsRow = k => `<div class="terms-row"><label class="chk"><input type="checkbox" name="agree" id="agree-${k}" data-terms="${k}" ${state.agreed[k] ? 'checked' : ''}><span>I have read and agree to the <button type="button" class="link" data-action="showTerms" data-kind="${k}">Library Rules &amp; Terms of Service</button>.</span></label><span class="err" data-for="agree"></span></div>`;
-function syncTerms(k){      // update the checkbox + gated button in place so typed form values are never lost
-  const c = $('#agree-' + k), ok = !!state.agreed[k]; if (c){ c.checked = ok; if (ok){ c.removeAttribute('aria-invalid'); const er = c.closest('.terms-row').querySelector('.err'); if (er) er.textContent = ''; } }
+const termsRow = k => { const ok = !!state.agreed[k]; return `<div class="terms-row ${ok ? 'done' : ''}" data-k="${k}"><div class="terms-box"><span class="terms-ico" aria-hidden="true">${ok ? I.check : I.rules}</span><div class="terms-txt"><b>${ok ? 'Library rules accepted' : 'Library Rules &amp; Terms of Service'}</b><small>${ok ? 'You can review them again at any time.' : 'Read the rules and accept them to continue.'}</small></div><button type="button" class="btn sm ${ok ? 'gray' : ''}" id="agree-${k}" data-action="showTerms" data-kind="${k}">${ok ? 'Review' : 'Read &amp; accept'}</button></div><span class="err" data-for="agree"></span></div>`; };
+function syncTerms(k){      // refresh the terms row + gated button in place so typed form values are never lost
+  const ok = !!state.agreed[k];
+  document.querySelectorAll(`.terms-row[data-k="${k}"]`).forEach(r => { r.outerHTML = termsRow(k); });
   document.querySelectorAll(`[data-needs-terms="${k}"]`).forEach(b => b.disabled = !ok);
-  const e = $('#login-err'); if (ok && e && /agree/.test(e.textContent)) e.textContent = '';
+  const e = $('#login-err'); if (ok && e && /accept|agree/.test(e.textContent)) e.textContent = '';
 }
-document.addEventListener('change', e => { const t = e.target; if (t.matches && t.matches('[data-terms]')){ state.agreed[t.dataset.terms] = t.checked; syncTerms(t.dataset.terms); } });
+/* the "I Agree" button unlocks only once the rules have been scrolled to the end */
+function termsCheck(){
+  const r = $('#modal-root .rules'), b = $('#terms-agree'); if (!r || !b) return;
+  if (r.scrollTop + r.clientHeight >= r.scrollHeight - 8){ b.disabled = false; const h = $('#terms-hint'); if (h) h.hidden = true; }
+}
+document.addEventListener('scroll', e => { if (e.target.classList && e.target.classList.contains('rules')) termsCheck(); }, true);
 
 /* ===== K. BOOK RETURN MODULE ===== */
 Object.assign(I, {scan:'<svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M8 9v6M12 9v6M16 9v6"/></svg>'});
@@ -1364,7 +1371,7 @@ function rtDetail(l){
     <div class="rt-sec"><h4>Book</h4><div class="rt-person">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ID ${b.id} · ISBN ${esc(b.isbn || '—')}</small></div></div></div>
     <div class="rt-sec"><h4>Borrower</h4><div class="rt-person"><span class="ini">${esc(initials(u.name))}</span><div><b>${esc(u.name)}</b><small>${esc(u.sid)} · ${esc(u.role || 'Student')}${u.college ? ' · ' + esc(u.college) : ''}</small><small>${esc(u.phone || 'No contact number')}</small></div></div></div>
     <div class="rt-sec"><h4>Loan</h4><div class="rt-dates"><div><small>Issued</small><b>${l.borrowed}</b></div><div><small>Due</small><b>${l.due}</b></div><div><small>Today</small><b>${addDays(0)}</b></div><div><small>Held for</small><b>${plural(held, 'day')}</b></div></div>
-      <p class="muted" style="margin-top:.6rem">Loan period: ${LOAN_DAYS} days · Late fine: ₱${FINE_PER_DAY} per day</p></div>
+      <p class="muted" style="margin-top:.6rem">Loan period: ${LOAN_DAYS} Days · Late fine: ₱${FINE_PER_DAY} per day</p></div>
     <div class="actions"><button class="btn gray" data-action="rtCancel">Cancel</button><button class="btn ok" data-action="rtConfirm" data-id="${l.id}">${I.check} Confirm Return</button></div></div>`;
 }
 function rtResult(){
@@ -1395,12 +1402,14 @@ function pageReturn(){
 }
 Object.assign(ACTIONS, {
   showTerms(el){
-    const k = el.dataset.kind;
-    openModal(`<h2>Library Rules &amp; Terms of Service</h2><p class="sub">Please read these before you ${k === 'student' ? 'register' : 'enter the library'}.</p>
+    const k = el.dataset.kind, done = !!state.agreed[k];
+    openModal(`<h2>Library Rules &amp; Terms of Service</h2><p class="sub">${done ? 'You have already accepted these rules.' : `Read all the rules below, then press <b>I Agree</b> to ${k === 'student' ? 'register' : 'enter the library'}.`}</p>
       <div class="rules" tabindex="0" role="region" aria-label="Library rules">${rulesFor().map(r => ruleCard(r, k)).join('')}</div>
-      <div class="actions"><button class="btn gray" data-action="closeModal">Close</button><button class="btn" data-action="agreeTerms" data-kind="${k}">I Agree</button></div>`, 'md');
+      <div class="terms-foot"><small class="terms-hint" id="terms-hint" ${done ? 'hidden' : ''}>Scroll to the end of the rules to enable “I Agree”.</small>
+      <div class="actions"><button class="btn gray" data-action="closeModal">${done ? 'Close' : 'Cancel'}</button>${done ? '' : `<button class="btn" id="terms-agree" data-action="agreeTerms" data-kind="${k}" disabled>I Agree</button>`}</div></div>`, 'md');
+    requestAnimationFrame(termsCheck);
   },
-  agreeTerms(el){ state.agreed[el.dataset.kind] = true; syncTerms(el.dataset.kind); closeModal(); },
+  agreeTerms(el){ if (el.disabled) return; state.agreed[el.dataset.kind] = true; syncTerms(el.dataset.kind); closeModal(); },
   rtScan(){
     if (!isDesk()) return; const inp = $('#rt-q'), q = inp.value, r = rtFind(q);
     state.rt = r.msg ? {q, msg:r.msg} : r.loans.length === 1 ? {q, loanId:r.loans[0].id} : {q, pick:r.loans.map(l => l.id)};
@@ -1425,3 +1434,27 @@ document.addEventListener('keydown', e => { if (e.target.id === 'rt-q' && e.key 
 window.addEventListener('hashchange', () => { if (state.user) render(); });
 
 load(); fillBookDetails(); const SP = Object.fromEntries(seedUsers().map(s => [s.sid, s.phone])); state.users.forEach(u => { u.college = u.college || ['CICS','CAS'][u.id % 2]; u.phone = u.phone || SP[u.sid] || ''; }); render();
+
+/* ----- table column alignment: counts centered, money + action columns right, everything else left (header always matches its cells) ----- */
+(function(){
+  const NUM = /^[−-]?\d[\d,]*(\.\d+)?%?$/, MON = /^[−-]?[₱$]\s?\d[\d,]*(\.\d+)?$/, ACT = /^(actions?|review|return|cancel|view|hold|remove|edit|delete)$/i;
+  const CLS = ['col-l','col-num','col-money','col-act'];
+  function align(t){
+    const ths = [...t.querySelectorAll('thead tr:last-child > th')]; if (!ths.length) return;
+    const rows = [...t.querySelectorAll('tbody > tr')].filter(r => ![...r.children].some(c => c.colSpan > 1));
+    ths.forEach((th, i) => {
+      const cells = rows.map(r => r.children[i]).filter(Boolean);
+      const vals = cells.map(c => c.textContent.replace(/\s+/g, ' ').trim()).filter(v => v && v !== '—' && v !== '-');
+      let cls = 'col-l';
+      if (cells.length && cells.every(c => c.querySelector('button')) && ACT.test(th.textContent.trim())) cls = 'col-act';
+      else if (vals.length && !cells.some(c => c.querySelector('.bar'))){
+        if (vals.every(v => NUM.test(v) || MON.test(v))) cls = vals.some(v => MON.test(v)) ? 'col-money' : 'col-num';
+      }
+      [th, ...cells].forEach(c => { if (!c.classList.contains(cls)){ c.classList.remove(...CLS); c.classList.add(cls); } });
+    });
+  }
+  let q = 0;
+  const run = () => { q = 0; document.querySelectorAll('table').forEach(align); };
+  new MutationObserver(() => { if (!q) q = requestAnimationFrame(run); }).observe(document.body, {childList:true, subtree:true});
+  run();
+})();
