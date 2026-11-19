@@ -2,7 +2,7 @@ const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQQAAAD+CAYAAADcdnvB
 /* ===== A. ICONS (add new ones here) ===== */
 const I = {
   book:'<svg viewBox="0 0 24 24"><path d="M2 5c3-1 7-1 10 2 3-3 7-3 10-2v14c-3-1-7-1-10 2-3-3-7-3-10-2z"/><path d="M12 7v14"/></svg>',
-  view:'<svg viewBox="0 0 24 24"><path d="M2 5c3-1 6-1 8 1v12c-2-2-5-2-8-1zM22 5c-3-1-6-1-8 1v12c2-2 5-2 8-1z"/><circle cx="16" cy="12" r="2.5"/></svg>',
+  view:'<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   edit:'<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M9 17l1-3 5-5 2 2-5 5z"/></svg>',
   archive:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/></svg>',
   restore:'<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
@@ -43,13 +43,19 @@ const $ = (sel, root = document) => root.querySelector(sel);
 let FINE_PER_DAY = 10, MAX_LOANS = 3;
 const LOAN_DAYS = 3;   // FIXED by library policy: not editable anywhere   // editable in Settings
 const STUDENT_PASSWORD = 'student123';                  // demo value
-const iso = d => d.toISOString().slice(0,10);
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;   // local calendar day (UTC would flip at 8am in the Philippines)
 const addDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+const fmtD = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ''); if (!m) return d; const dt = new Date(+m[1], +m[2] - 1, +m[3]); return dt.toLocaleDateString('en-US', {month:'short', day:'numeric', ...(+m[1] === new Date().getFullYear() ? {} : {year:'numeric'})}); };
 const isActive = l => !l.returned;                // returned loans stay in state.loans as history
 const loanInfo = l => {                      // status + fine for one loan
   const days = Math.floor((new Date(iso(new Date())) - new Date(l.due)) / 864e5);   // >0 = overdue
-  return {days, status: days > 0 ? 'Overdue' : days >= -3 ? 'Due Soon' : 'Borrowed', fine: Math.max(0, days) * FINE_PER_DAY};
+  return {days, status: days > 0 ? 'Overdue' : days === 0 ? 'Due Today' : days === -1 ? 'Due Soon' : 'Borrowed', fine: Math.max(0, days) * FINE_PER_DAY};
 };
+
+/* one vocabulary for loan status: On loan, Due tomorrow, Due today, Overdue, Returned, Returned late */
+const STAT = {Overdue:['Overdue','late'], 'Due Today':['Due today','soon'], 'Due Soon':['Due tomorrow','soon'], Borrowed:['On loan',''], Returned:['Returned','ok']};
+const stLabel = l => l.status === 'Returned' && l.late ? 'Returned late' : (STAT[l.status] || [l.status, ''])[0];
+const stCls = l => l.status === 'Returned' ? (l.late ? 'soon' : 'ok') : (STAT[l.status] || [l.status, ''])[1];
 
 /* ===== B. STATE + STORAGE (swap for a real API later) ===== */
 const COVERS = {
@@ -199,7 +205,7 @@ const area = (label, name, val = '') =>
   `<div class="field"><label for="f-${name}">${label} *</label><textarea class="input" id="f-${name}" name="${name}" rows="4" maxlength="600">${esc(val)}</textarea><span class="err" data-for="${name}"></span></div>`;
 const field = (label, name, val = '', type = 'text', ph = '') =>
   `<div class="field"><label for="f-${name}">${label} *</label><input class="input" id="f-${name}" name="${name}" type="${type}" value="${esc(val)}" placeholder="${esc(ph)}"><span class="err" data-for="${name}"></span></div>`;
-const bookFacts = b => `<div class="facts"><div><b>ISBN:</b>${esc(b.isbn)}</div><div><b>Title:</b>${esc(b.title)}</div><div><b>Author:</b>${esc(b.author)}</div>
+const bookFacts = b => `<div class="facts book-facts"><div><b>ISBN:</b>${esc(b.isbn)}</div><div><b>Author:</b>${esc(b.author)}</div>
   <div><b>Edition:</b>${esc(b.edition||'—')}</div><div><b>Genre:</b>${esc(b.genre)}</div><div><b>Total Copies:</b>${b.total}</div><div><b>Available:</b>${b.available}</div>
   <div class="syn-row"><b>Synopsis:</b><p class="syn">${esc(b.synopsis||'No synopsis provided.')}</p></div></div>`;
 const COVER_COLORS = ['#2f4a5c','#6b2d3a','#3d5a45','#2b5a6f','#7a5a2b','#2b4b6f','#58493f','#35504f'];
@@ -222,7 +228,9 @@ const bookStatus = b => {
 const queueOf = b => state.resv.filter(r => r.bookId === b.id && r.status === 'Waiting').length;
 const statusBadge = b => `<span class="status s-${bookStatus(b)}">${bookStatus(b)}</span>`;
 function kpiCards(items, icons = ['layers','check','clock','alert'], tones = ['brand','green','amber','red']){
-  return `<div class="kpis">${items.map(([v, l, ic, tn], i) => `<div class="kpi"><span class="kpi-i tone-${tn || tones[i % 4]}" aria-hidden="true">${I[ic || icons[i % 4]]}</span><div><b>${v}</b><small>${l}</small></div></div>`).join('')}</div>`;
+  return `<div class="kpis">${items.map(([v, l, ic, tn, to], i) => { tn = tn || tones[i % 4]; const link = to && routes().some(r => r.key === to), alert = tn === 'red' && +v > 0;
+    const inner = `<span class="kpi-i tone-${tn}" aria-hidden="true">${I[ic || icons[i % 4]]}</span><div><small>${l}</small><b>${v}</b></div>`;
+    return link ? `<button type="button" class="kpi kpi-link ${alert ? 'alert' : ''}" data-action="go" data-key="${to}" aria-label="${l}: ${v}. Open ${routes().find(r => r.key === to).label}">${inner}</button>` : `<div class="kpi ${alert ? 'alert' : ''}">${inner}</div>`; }).join('')}</div>`;
 }
 function bookTable(list, actions){
   if (!list.length) return `<div class="empty">No books to show.</div>`;
@@ -248,42 +256,52 @@ const filterBooks = (list, q) => { q = q.trim().toLowerCase(); let out = q ? lis
 const INV_ACTIONS = [{action:'viewBook',icon:'view',label:'View'},{action:'editBook',icon:'edit',label:'Update'},{action:'archiveBook',icon:'archive',label:'Archive'},{action:'quickIssue',icon:'issue',label:'Issue'}];
 const ARC_ACTIONS = [{action:'viewBook',icon:'view',label:'View'},{action:'restoreBook',icon:'restore',label:'Restore'}];
 
+const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; };
+const firstName = n => String(n || '').split(' ')[0];
 function pageDashboard(){
   const L = state.loans.filter(isActive).map(l => ({...l, ...loanInfo(l), book: findBook(l.bookId, state.books) || findBook(l.bookId, state.archived) || {title:'(removed)'}, user: findBook(l.uid, state.users) || {name:'(removed)', sid:'—', college:''}}));
-  const overdue = L.filter(l => l.status === 'Overdue'), newest = [...state.books].sort((a,b) => b.id - a.id).slice(0,3), recent = [...L].sort((a,b) => b.id - a.id).slice(0,4);
+  const overdue = L.filter(l => l.status === 'Overdue'), newest = [...state.books].sort((a,b) => b.id - a.id).slice(0,3), recent = [...L].sort((a,b) => b.id - a.id).slice(0,3);
   const admin = state.role === 'admin', pend = pendingCount(), mine = state.requests.filter(r => r.by === STAFF.name && r.status === 'Pending').length, od = overdue.length;
   const date = new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'});
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   const summary = `${plural(admin ? pend : mine, admin ? 'book request' : 'of your book request')} awaiting approval · ${plural(od, 'overdue return')}`;
-  const actions = admin
-    ? `<button class="btn light" data-action="addBook">${I.plus} Add Book</button><button class="btn ghost" data-action="go" data-key="requests">Review Requests${pend ? ` (${pend})` : ''}</button>`
-    : `<button class="btn light" data-action="addBook">${I.plus} Request New Book</button><button class="btn ghost" data-action="go" data-key="requests">My Requests</button>`;
   const rows = Object.entries(COLLEGES).map(([k,name]) => { const us = state.users.filter(u => u.college === k), ls = L.filter(l => l.user.college === k);
     return {k, name, users:us.length, students:us.filter(u=>u.role==='Student').length, loans:ls.length, overdue:ls.filter(l=>l.status==='Overdue').length, fines:ls.reduce((n,l)=>n+l.fine,0)}; });
   const sum = f => rows.reduce((n,r) => n + r[f], 0), total = sum('loans') || 1;
-  const kpi = [[state.books.reduce((n,b)=>n+b.total,0),'Total Books'],[state.users.filter(u=>u.role==='Student').length,'No. of Students'],[L.length,'Books Issued'],[od,'Overdue Returns']];
-  const stBadge = l => `<span class="badge ${l.status==='Overdue'?'late':l.status==='Due Soon'?'soon':''}">${l.status==='Borrowed'?'Issued':l.status}</span>`;
-  return `<div class="p-hero"><div class="p-id"><h2>Library Overview</h2><p>${date}</p><p>${summary}</p></div><div class="hero-actions">${actions}</div></div>
+  const kpi = [[state.books.reduce((n,b)=>n+b.total,0),'Total Books',null,null,'inventory'],[state.users.filter(u=>u.role==='Student').length,'No. of Students',null,null,'user'],[L.length,'Books on loan',null,null,'return'],[od,'Overdue returns',null,null,'return']];
+  const stBadge = l => `<span class="badge ${stCls(l)}">${stLabel(l)}</span>`;
+  const hr = new Date().getHours(), greet = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening', first = String(state.user || '').split(' ')[0];
+  const has = k => routes().some(r => r.key === k), cnt = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const tasks = overdue.slice(0, 5).map(l => ({tone:'red', title:esc(l.book.title), sub:`${esc(l.user.name)} · ${esc(l.user.college || '—')} · ${cnt(l.days, 'day')} overdue · ₱${l.fine.toFixed(2)} fine`,
+    btn:`<button class="btn ok sm" data-action="returnLoan" data-id="${l.id}" aria-label="Mark ${esc(l.book.title)} as returned">Mark returned</button>`}));
+  if (overdue.length > 5) tasks.push({tone:'red', title:`${overdue.length - 5} more overdue ${overdue.length - 5 === 1 ? 'book' : 'books'}`, sub:'See the full list on the Book Return page.', btn:`<button class="btn gray sm" data-action="go" data-key="return">View all</button>`});
+  const regN = state.regs.filter(r => r.status === 'Pending').length, resN = state.resv.filter(r => r.status === 'Ready').length;
+  if (admin && pend && has('requests')) tasks.push({tone:'amber', title:`${cnt(pend, 'book request')} awaiting approval`, sub:'Staff are waiting on a decision.', btn:`<button class="btn sm" data-action="go" data-key="requests">Review</button>`});
+  if (regN && has('registrations')) tasks.push({tone:'amber', title:`${cnt(regN, 'student registration')} to verify`, sub:'Students cannot log in until a librarian approves them.', btn:`<button class="btn sm" data-action="go" data-key="registrations">Review</button>`});
+  if (resN && has('reservations')) tasks.push({tone:'brand', title:`${cnt(resN, 'reserved book')} ready for pickup`, sub:'Held for the student until the pickup deadline.', btn:`<button class="btn sm" data-action="go" data-key="reservations">Open</button>`});
+  const attnTotal = od + (admin ? pend : 0) + regN + resN;
+  const attn = `<section class="v-sec attn"><h3>Needs attention${attnTotal ? ` <span class="badge late">${attnTotal}</span>` : ''}</h3>${tasks.length ? `<ul class="attn-list">${tasks.map(t => `<li class="attn-row"><span class="attn-dot ${t.tone}" aria-hidden="true"></span><div class="attn-t"><b>${t.title}</b><small>${t.sub}</small></div>${t.btn}</li>`).join('')}</ul>` : `<div class="attn-empty">${I.check}<b>All clear</b><small>No overdue books, pending requests or reservations to handle.</small></div>`}</section>`;
+  return `<div class="page-head dash-head"><div class="ph-t"><h2>${greet}${first ? ', ' + esc(first) : ''}</h2><p>${date} · ${summary}</p></div></div>
   ${kpiCards(kpi, ['book','users','swap','alert'], ['brand','green','amber','red'])}
   ${admin ? '' : staffReqSection()}
-  <div class="v-sec top"><h3>College Summary Report</h3><div class="table-wrap"><table><thead><tr><th class="cell-l">College</th><th>Users</th><th>Students</th><th>Active Loans</th><th>Overdue</th><th>Fines</th><th>Share of Loans</th></tr></thead><tbody>
+  <div class="v-grid dash-grid">${attn}
+  <div><div class="v-sec"><h3>New Books</h3>${newest.map(b=>`<div class="arr">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ${b.added}</small></div><button class="icon-btn" data-action="viewBook" data-id="${b.id}" aria-label="View ${esc(b.title)}" title="View">${I.view}</button></div>`).join('')||'<p class="muted">No books yet.</p>'}</div>
+  <div class="v-sec"><h3>Recent Borrowers</h3>${recent.map(l=>`<div class="arr"><span class="ini">${esc(l.user.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase())}</span><div><b>${esc(l.user.name)}</b><small>${l.user.sid}</small></div>${stBadge(l)}</div>`).join('')||'<p class="muted">No loans yet.</p>'}</div></div></div>
+  <div class="v-sec"><h3>College Summary Report</h3><div class="table-wrap"><table><thead><tr><th class="cell-l">College</th><th>Users</th><th>Students</th><th>Active Loans</th><th>Overdue</th><th>Fines</th><th>Share of Loans</th></tr></thead><tbody>
     ${rows.map(r => { const pct = Math.round(r.loans/total*100); return `<tr><td class="cell-l"><b>${r.k}</b><br><small>${r.name}</small></td><td>${r.users}</td><td>${r.students}</td><td>${r.loans}</td><td>${r.overdue}</td><td>₱${r.fines.toFixed(2)}</td>
       <td style="min-width:130px"><div class="bar" role="img" aria-label="${pct}% of active loans"><i style="width:${pct}%"></i></div><small>${pct}%</small></td></tr>`; }).join('')}
-    <tr class="tot"><td class="cell-l">All colleges</td><td>${sum('users')}</td><td>${sum('students')}</td><td>${sum('loans')}</td><td>${sum('overdue')}</td><td>₱${sum('fines').toFixed(2)}</td><td></td></tr></tbody></table></div></div>
-  <div class="v-grid"><div class="v-sec overdue-fine-tracker"><h3>Overdue Books &amp; Fine Tracker</h3><div class="table-wrap">${!od ? '<div class="empty">No overdue books.</div>' : `<table><thead><tr><th class="cell-l">Student</th><th>College</th><th>Book</th><th>Due Date</th><th>Days</th><th>Fine</th></tr></thead><tbody>
-    ${overdue.map(l=>`<tr><td class="cell-l"><b>${esc(l.user.name)}</b><br><small>${l.user.sid}</small></td><td>${esc(l.user.college)}</td><td>${esc(l.book.title)}</td><td>${l.due}</td><td>${l.days}</td><td>₱${l.fine.toFixed(2)}</td></tr>`).join('')}</tbody></table>`}</div></div>
-  <div><div class="v-sec"><h3>New Books</h3>${newest.map(b=>`<div class="arr">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ${b.added}</small></div><button class="icon-btn" data-action="viewBook" data-id="${b.id}" aria-label="View ${esc(b.title)}" title="View">${I.view}</button></div>`).join('')||'<p class="muted">No books yet.</p>'}</div>
-  <div class="v-sec"><h3>Recent Borrowers</h3>${recent.map(l=>`<div class="arr"><span class="ini">${esc(l.user.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase())}</span><div><b>${esc(l.user.name)}</b><small>${l.user.sid}</small></div>${stBadge(l)}</div>`).join('')||'<p class="muted">No loans yet.</p>'}</div></div></div>`;
+    <tr class="tot"><td class="cell-l">All colleges</td><td>${sum('users')}</td><td>${sum('students')}</td><td>${sum('loans')}</td><td>${sum('overdue')}</td><td>₱${sum('fines').toFixed(2)}</td><td></td></tr></tbody></table></div></div>`;
 }
-const phead = (title, sub, btn, ph, label) => `<div class="page-head"><div class="ph-t"><h2>${title}</h2><p>${sub}</p></div>
-  <div class="ph-act"><label class="search">${I.search}<input id="search" type="search" placeholder="${ph}" value="${esc(state.search)}" aria-label="${label}"></label>${btn}</div></div>`;
+let pageSearch = null;   // placeholder + label of the section's own search box, read by the top bar so both always match
+const phead = (title, sub, btn, ph, label) => (pageSearch = {ph, label}, `<div class="page-head"><div class="ph-t"><h2>${title}</h2><p>${sub}</p></div>
+  <div class="ph-act"><label class="search">${I.search}<input id="search" type="search" placeholder="${ph}" value="${esc(state.search)}" aria-label="${label}"></label>${btn}</div></div>`);
 function pageInventory(){
   const admin = state.role === 'admin', B = state.books, cnt = s => B.filter(b => bookStatus(b) === s).length;
   const copies = B.reduce((n, b) => n + b.total, 0), shelf = B.reduce((n, b) => n + b.available, 0);
   const kpi = [[B.length,'Titles in catalog','layers','brand'],[copies,'Total copies','book','slate'],[shelf,'Copies on shelf','check','green'],[copies - shelf,'Copies on loan or held','swap','amber']];
   const chips = [['','All',B.length],['Available','Available',cnt('Available')],['Borrowed','Borrowed',cnt('Borrowed')],['Reserved','Reserved',cnt('Reserved')]];
   return phead('Library Inventory', 'Manage titles, copies and availability across the collection.',
-      `<button class="btn" data-action="addBook">${I.plus} ${admin ? 'Add Book' : 'Request New Book'}</button>`, 'Filter this list…', 'Search books') + kpiCards(kpi) +
+      `<button class="btn" data-action="addBook">${I.plus} ${admin ? 'Add book' : 'Request new book'}</button>`, 'Search title, author or ISBN…', 'Search books') + kpiCards(kpi) +
     `<div class="card flush"><div class="tbl-bar"><div class="chips" role="group" aria-label="Filter by status">${chips.map(([k, l, n]) => `<button data-action="setStatus" data-s="${k}" aria-pressed="${state.stFilter === k}">${l}<span>${n}</span></button>`).join('')}</div></div>
     <div class="table-wrap" id="book-list">${bookTable(filterBooks(B, state.search), admin ? INV_ACTIONS : [INV_ACTIONS[0]])}</div></div>`;
 }
@@ -291,26 +309,39 @@ function pageArchive(){
   return phead('Archived Books', 'Titles removed from circulation. Restore one to put it back in the catalog.', '', 'Search archive…', 'Search archive') +
     `<div class="card flush"><div class="table-wrap" id="book-list">${bookTable(filterBooks(state.archived, state.search), ARC_ACTIONS)}</div></div>`;
 }
-const filterUsers = q => { q = q.trim().toLowerCase(); return q ? state.users.filter(u => [u.id,u.sid,u.name,u.email,u.phone,u.role].join(' ').toLowerCase().includes(q)) : state.users; };
-function userTable(list){  // fits the page width: no horizontal scroll
-  if (!list.length) return `<div class="empty">No users to show.</div>`;
-  const acts = [['viewUser','view','View'],['editUser','edit','Update'],['deleteUser','trash','Delete']];
-  return `<table class="users-tbl"><thead><tr><th>ID</th><th>Student ID</th><th>Name</th><th>Email</th><th>Contact No.</th><th>Role</th><th>College</th><th>Loans</th><th>Actions</th></tr></thead><tbody>
-    ${list.map(u=>`<tr><td>${u.id}</td><td>${esc(u.sid)}</td><td class="u-name">${esc(u.name)}</td><td class="u-mail">${esc(u.email)}</td><td>${esc(u.phone||'—')}</td><td><span class="badge">${esc(u.role)}</span></td><td>${esc(u.college||'—')}</td><td><button class="link" data-action="userHistory" data-id="${u.id}" aria-label="Loan history for ${esc(u.name)}">${loanCounts(u.id)}</button></td>
-    <td class="u-acts">${acts.map(a=>`<button class="icon-btn" data-action="${a[0]}" data-id="${u.id}" aria-label="${a[2]} ${esc(u.name)}" title="${a[2]}">${I[a[1]]}</button>`).join('')}</td></tr>`).join('')}</tbody></table>`;
+const filterUsers = q => { q = q.trim().toLowerCase(); let out = q ? state.users.filter(u => [u.id,u.sid,u.name,u.email,u.phone,u.role,u.college].join(' ').toLowerCase().includes(q)) : state.users;
+  if (state.roleFilter && state.user && currentRoute().key === 'user') out = out.filter(u => u.role === state.roleFilter); return out; };
+function userTable(list){  // text columns left-aligned, actions right-aligned (opts out of the auto-centering in the aligner)
+  const filtered = !!(state.search.trim() || state.roleFilter);
+  if (!list.length) return `<div class="empty rich"><span class="empty-ico" aria-hidden="true">${I.users}</span><b>No users found</b><p>${filtered ? 'Try a different search, or clear the role filter.' : 'Add a user to give them access to the library.'}</p></div>`;
+  const acts = [['viewUser','view','View profile',''],['editUser','edit','Edit',''],['deleteUser','trash','Delete','danger']];
+  const rows = list.map(u => {
+    const act = loanHistory(u.id).filter(l => !l.returned), od = act.filter(l => l.status === 'Overdue').length;
+    return `<tr><td><div class="t-cell"><span class="ini" aria-hidden="true">${esc(initials(u.name))}</span><div class="t-main"><button class="link name-link" data-action="viewUser" data-id="${u.id}">${esc(u.name)}</button><small>${esc(u.email)}</small></div></div></td>
+    <td><span class="mono">${esc(u.sid)}</span></td><td><span class="tag">${esc(u.role)}</span></td><td>${esc(u.college || '—')}</td>
+    <td>${u.phone ? `<a class="tel" href="tel:${esc(u.phone.replace(/\s/g, ''))}">${esc(u.phone)}</a>` : '—'}</td>
+    <td class="u-loans"><div class="u-loans-in"><button class="loan-pill ${act.length ? 'on' : ''}" data-action="userHistory" data-id="${u.id}" aria-label="Loan history for ${esc(u.name)}: ${act.length} on loan${od ? ', ' + od + ' overdue' : ''}">${act.length ? act.length + ' on loan' : 'No loans'}</button>${od ? `<span class="badge late">${od} overdue</span>` : ''}</div></td>
+    <td><div class="row-acts">${acts.map(a => `<button class="ra ${a[3]}" data-action="${a[0]}" data-id="${u.id}" aria-label="${a[2]}: ${esc(u.name)}" title="${a[2]}">${I[a[1]]}</button>`).join('')}</div></td></tr>`; }).join('');
+  return `<table class="users-tbl"><thead><tr><th>User</th><th>School ID</th><th>Role</th><th>College</th><th>Contact</th><th>Loans</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="tbl-foot">${filtered ? `Showing ${list.length} of ${state.users.length} users` : `${list.length} user${list.length === 1 ? '' : 's'}`}</div>`;
 }
 function pageUsers(){
-  return phead('User Management', 'Students, faculty and staff with access to the library.', `<button class="btn" data-action="addUser">${I.plus} Add User</button>`, 'Search users…', 'Search users') + `
-    <div class="card"><div class="table-wrap" id="book-list">${userTable(filterUsers(state.search))}</div></div>`;
+  const U = state.users, cnt = r => U.filter(u => u.role === r).length, act = state.loans.filter(isActive);
+  const borrowing = new Set(act.map(l => l.uid)), late = new Set(act.filter(l => loanInfo(l).status === 'Overdue').map(l => l.uid));
+  const kpi = [[U.length,'Total users','users','brand'],[cnt('Student'),'Students','user','slate'],[U.filter(u => borrowing.has(u.id)).length,'Borrowing now','swap','brand'],[U.filter(u => late.has(u.id)).length,'With overdue books','alert','red','return']];
+  const chips = [['','All',U.length],['Student','Students',cnt('Student')],['Faculty','Faculty',cnt('Faculty')],['Staff','Staff',cnt('Staff')]];
+  return phead('User Management', 'Students, faculty and staff with access to the library.', `<button class="btn" data-action="addUser">${I.plus} Add user</button>`, 'Search users…', 'Search users') + kpiCards(kpi) + `
+    <div class="card flush"><div class="tbl-bar"><div class="chips" role="group" aria-label="Filter by role">${chips.map(([k, l, n]) => `<button data-action="setRole" data-r="${k}" aria-pressed="${(state.roleFilter || '') === k}">${l}<span>${n}</span></button>`).join('')}</div></div>
+    <div class="table-wrap" id="book-list">${userTable(filterUsers(state.search))}</div></div>`;
 }
 const sel = (label, name, opts, cur) => `<div class="field"><label for="f-${name}">${label} *</label><select class="input" id="f-${name}" name="${name}">${opts.map(o=>`<option ${cur===o?'selected':''}>${o}</option>`).join('')}</select><span class="err" data-for="${name}"></span></div>`;
-const userForm = (u = {}) => `${field('Student ID (e.g. 12-34567-890)','sid',u.sid||'')}${field('Full Name','name',u.name||'')}<div class="row2">${field('Email','email',u.email||'','email')}${field('Contact Number','phone',u.phone||'','tel','0917 123 4567')}</div>
+const userForm = (u = {}) => `${field('School ID','sid',u.sid||'','text','12-34567-890')}${field('Full name','name',u.name||'')}<div class="row2">${field('Email','email',u.email||'','email','name@school.edu')}${field('Contact number','phone',u.phone||'','tel','0917 123 4567')}</div>
   <div class="row2">${sel('Role','role',ROLES,u.role)}${sel('College','college',Object.keys(COLLEGES),u.college)}</div>`;
 function validateUser(v, selfId){
   const e = {};
   if (!/^\d{2}-\d{5}-\d{3}$/.test(v.sid.trim())) e.sid = 'Use the format 12-34567-890';
-  else if (state.users.some(u => u.sid === v.sid.trim() && u.id !== selfId)) e.sid = 'This Student ID already exists';
-  if (!v.name.trim()) e.name = 'Full Name cannot be empty';
+  else if (state.users.some(u => u.sid === v.sid.trim() && u.id !== selfId)) e.sid = 'This School ID already exists';
+  if (!v.name.trim()) e.name = 'Full name cannot be empty';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email.trim())) e.email = 'Please enter a valid email address';
   if (!normPhone(v.phone||'')) e.phone = PHONE_ERR;
   if (!ROLES.includes(v.role)) e.role = 'Select a role';
@@ -339,52 +370,53 @@ function historyPanel(uid, canReturn){
   const by = l => l.by ? `<br><small>Issued by ${esc(l.by)}</small>` : '';
   const activeTbl = !act.length ? '<div class="empty">No books are currently borrowed.</div>'
     : `<div class="table-wrap"><table class="loan-tbl hist-tbl"><thead><tr><th class="cell-l c-book">Book</th><th class="c-bor c-date">Borrowed</th><th class="c-date">Due</th><th class="c-stat">Status</th><th class="c-fine">Fine</th>${canReturn ? '<th class="c-act">Return</th>' : ''}</tr></thead><tbody>
-    ${act.map(l => `<tr><td class="cell-l c-book"><b>${esc(l.book.title)}</b>${by(l)}</td><td class="c-bor c-date">${l.borrowed}</td><td class="c-date">${l.due}</td><td class="c-stat"><span class="badge ${stCls(l)}">${stLabel(l)}</span></td><td class="c-fine">₱${l.fine.toFixed(2)}</td>
+    ${act.map(l => `<tr><td class="cell-l c-book"><b>${esc(l.book.title)}</b>${by(l)}</td><td class="c-bor c-date">${fmtD(l.borrowed)}</td><td class="c-date">${fmtD(l.due)}</td><td class="c-stat"><span class="badge ${stCls(l)}">${stLabel(l)}</span></td><td class="c-fine">₱${l.fine.toFixed(2)}</td>
       ${canReturn ? `<td class="c-act"><button class="btn ok sm" data-action="returnLoan" data-id="${l.id}" aria-label="Mark ${esc(l.book.title)} as returned">Mark returned</button></td>` : ''}</tr>`).join('')}</tbody></table></div>`;
   const retTbl = !ret.length ? '<div class="empty">No returned books yet.</div>'
     : `<div class="table-wrap"><table class="loan-tbl hist-tbl"><thead><tr><th class="cell-l c-book">Book</th><th class="c-bor c-date">Borrowed</th><th class="c-date">Due</th><th class="c-date">Returned</th><th class="c-stat">Status</th><th class="c-fine">Fine</th></tr></thead><tbody>
-    ${ret.map(l => `<tr><td class="cell-l c-book"><b>${esc(l.book.title)}</b>${by(l)}</td><td class="c-bor c-date">${l.borrowed}</td><td class="c-date">${l.due}</td><td class="c-date">${l.returned}</td><td class="c-stat"><span class="badge ${l.late ? 'soon' : 'ok'}">${l.late ? 'Returned late' : 'Returned'}</span></td><td class="c-fine">₱${l.fine.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
+    ${ret.map(l => `<tr><td class="cell-l c-book"><b>${esc(l.book.title)}</b>${by(l)}</td><td class="c-bor c-date">${fmtD(l.borrowed)}</td><td class="c-date">${fmtD(l.due)}</td><td class="c-date">${fmtD(l.returned)}</td><td class="c-stat"><span class="badge ${l.late ? 'soon' : 'ok'}">${l.late ? 'Returned late' : 'Returned'}</span></td><td class="c-fine">₱${l.fine.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
   return `<div class="hist"><div class="stat-strip">${stats.map(([v,l]) => `<div><b>${v}</b><small>${l}</small></div>`).join('')}</div>
     <h3 class="sub-h">Currently borrowed (${act.length})</h3>${activeTbl}<h3 class="sub-h">Returned (${ret.length})</h3>${retTbl}</div>`;
 }
 const userModal = (u, tab = 'profile') => {
   const n = loanHistory(u.id).filter(l => !l.returned).length;
-  const body = tab === 'history' ? historyPanel(u.id, isDesk()) : `<div class="detail">${avatar}<div class="facts">
-      <div><b>Student ID:</b>${esc(u.sid)}</div><div><b>Name:</b>${esc(u.name)}</div><div><b>Email:</b>${esc(u.email)}</div><div><b>Contact No.:</b>${esc(u.phone||'—')}</div><div><b>Role:</b>${esc(u.role)}</div><div><b>College:</b>${esc(u.college||'—')}</div></div></div>`;
-  return `<h2>User Profile: ${esc(u.name)}</h2>
-    <div class="tabs" role="tablist" aria-label="Profile sections" style="margin:.8rem 0 1rem">${[['profile','Profile'],['history','Loan History']].map(([k,l]) =>
+  const profile = `<div class="u-prof"><span class="avatar-lg" aria-hidden="true">${esc(initials(u.name))}</span><div><h3>${esc(u.name)}</h3><span class="tag">${esc(u.role)}</span></div></div>
+    <dl class="u-facts"><div><dt>School ID</dt><dd class="mono">${esc(u.sid)}</dd></div><div><dt>College</dt><dd>${esc(COLLEGES[u.college] || u.college || '—')}</dd></div>
+    <div><dt>Email</dt><dd>${esc(u.email)}</dd></div><div><dt>Contact number</dt><dd>${esc(u.phone || '—')}</dd></div></dl>`;
+  const body = tab === 'history' ? historyPanel(u.id, isDesk()) : profile;
+  const edit = state.role === 'admin' && tab === 'profile' ? `<button class="btn" data-action="editUser" data-id="${u.id}">${I.edit} Edit user</button>` : '';
+  return `<h2>${tab === 'history' ? 'Loan history' : 'User profile'}</h2>
+    <div class="tabs" role="tablist" aria-label="Profile sections" style="margin:.8rem 0 1rem">${[['profile','Profile'],['history','Loan history']].map(([k,l]) =>
       `<button role="tab" data-action="userTab" data-id="${u.id}" data-tab="${k}" aria-selected="${tab===k}">${l}${k==='history' ? `<span class="badge ${n?'':'gray'}">${n}</span>` : ''}</button>`).join('')}</div>
-    ${body}<div class="actions"><button class="btn" data-action="closeModal">Close</button></div>`;
+    ${body}<div class="actions"><button class="btn gray" data-action="closeModal">Close</button>${edit}</div>`;
 };
 
 const myLoans = () => state.loans.filter(l => isActive(l) && l.uid === state.studentId).map(l => ({...l, ...loanInfo(l),
   book: findBook(l.bookId, state.books) || findBook(l.bookId, state.archived) || {title:'(removed book)', author:'—'}}));
 const loanTable = L => !L.length ? `<div class="empty">You have no borrowed books.</div>` :
   `<table class="loan-tbl"><thead><tr><th class="cell-l">Book</th><th class="c-bor">Borrowed</th><th>Due</th><th>Status</th><th>Fine</th></tr></thead><tbody>
-  ${L.map(l=>`<tr><td class="cell-l"><b>${esc(l.book.title)}</b><small>${esc(l.book.author)}</small></td><td class="c-bor">${l.borrowed}</td><td>${l.due}</td>
-  <td><span class="badge ${l.status==='Overdue'?'late':l.status==='Due Soon'?'soon':''}">${l.status}</span></td><td>₱${l.fine.toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
+  ${L.map(l=>`<tr><td class="cell-l" data-label="Book"><b>${esc(l.book.title)}</b><small>${esc(l.book.author)}</small></td><td class="c-bor" data-label="Borrowed">${fmtD(l.borrowed)}</td><td data-label="Due">${fmtD(l.due)}</td>
+  <td data-label="Status"><span class="badge ${stCls(l)}">${stLabel(l)}</span></td><td data-label="Fine">₱${l.fine.toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
 function studentBookTable(list, canBorrow = true){
   if (!list.length) return `<div class="empty">No books found.</div>`;
   return `<table><thead><tr><th>Title</th><th>Edition</th><th>Genre</th><th>Status</th><th>View</th><th>${canBorrow?'Reserve':'Read in Library'}</th>${canBorrow&&state.role==='student'?'<th>Save</th>':''}</tr></thead><tbody>
   ${list.map(b=>`<tr><td class="cell-l"><div class="t-cell">${thumb(b)}<div class="t-main"><b>${esc(b.title)}</b><small>${esc(b.author)}</small></div></div></td><td>${esc(b.edition||'—')}</td><td>${esc(b.genre)}</td><td>${statusBadge(b)}<span class="q-note">${b.available} of ${b.total} on shelf</span></td>
-  <td><button class="icon-btn" data-action="viewBook" data-id="${b.id}" aria-label="View ${esc(b.title)}" title="View">${I.view}</button></td>
+  <td><button class="icon-btn view-lg" data-action="viewBook" data-id="${b.id}" aria-label="View ${esc(b.title)}" title="View">${I.view}</button></td>
   <td>${!canBorrow?(b.available>0?'<span class="badge">Available to read</span>':'<span class="badge gray">In use</span>'):holdBtn(b,true)}</td>${canBorrow&&state.role==='student'?`<td>${wishBtn(b)}</td>`:''}</tr>`).join('')}</tbody></table>`;
 }
 function pageStudentDash(){
   const L = myLoans(), u = findBook(state.studentId, state.users) || {}, newest = [...state.books].sort((a,b) => b.id - a.id).slice(0,3);
-  const od = L.filter(l => l.status === 'Overdue').length, soon = L.filter(l => l.status === 'Due Soon').length, fines = L.reduce((n,l) => n + l.fine, 0), pct = Math.min(100, Math.round(L.length / MAX_LOANS * 100));
+  const od = L.filter(l => l.status === 'Overdue').length, soon = L.filter(l => l.status === 'Due Soon' || l.status === 'Due Today').length, fines = L.reduce((n,l) => n + l.fine, 0), pct = Math.min(100, Math.round(L.length / MAX_LOANS * 100));
   const date = new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'}), s = n => n === 1 ? '' : 's';
   const alert = od ? `<div class="alert"><b>${od} overdue book${s(od)}.</b> Please return ${od === 1 ? 'it' : 'them'} at the library desk. Fines so far: ₱${fines.toFixed(2)}.</div>`
-    : soon ? `<div class="alert warn"><b>${soon} book${s(soon)} due within 3 days.</b> Return on time to avoid a fine of ₱${FINE_PER_DAY} per day.</div>` : '';
-  const kpi = [[L.length,'Books borrowed'],[soon,'Due soon'],[od,'Overdue'],['₱'+fines.toFixed(2),'Total fines']];
-  return `<div class="p-hero"><div class="p-id"><h2>Your Library Account</h2><p>${date}</p><p><span class="chip">${esc(u.role||'Student')}</span><span class="chip">${esc(u.college||'—')}</span></p></div>
-    <div class="p-meter"><small>Borrowing capacity</small><b>${L.length} / ${MAX_LOANS}</b><div class="bar light" role="img" aria-label="${pct}% of borrowing limit used"><i style="width:${pct}%"></i></div></div>
-    <div class="hero-actions"><button class="btn light" data-action="go" data-key="browse">Browse Books</button><button class="btn ghost" data-action="go" data-key="mybooks">My Books</button></div></div>
+    : soon ? `<div class="alert warn"><b>${soon} book${s(soon)} due today or tomorrow.</b> Return on time to avoid a fine of ₱${FINE_PER_DAY} per day.</div>` : '';
+  const kpi = [[`${L.length} / ${MAX_LOANS}`,'Books borrowed',null,null,'mybooks'],[soon,'Due soon',null,null,'mybooks'],[od,'Overdue',null,null,'mybooks'],['₱'+fines.toFixed(2),'Total fines']];
+  return `<div class="page-head dash-head"><div class="ph-t"><h2>${greeting()}${firstName(state.user) ? ', ' + esc(firstName(state.user)) : ''}</h2><p>${date} · ${esc(u.role||'Student')} · ${esc(u.college||'—')}</p></div>
+    <div class="ph-act"><button class="btn" data-action="go" data-key="browse">Browse books</button><button class="btn gray" data-action="go" data-key="mybooks">My books</button></div></div>
   ${alert}
   ${kpiCards(kpi, ['book','clock','alert','wallet'], ['brand','amber','red','slate'])}
-  <div class="v-grid"><div class="v-sec"><h3>My Current Loans</h3><div class="table-wrap">${loanTable(L)}</div></div>
-  <div class="v-sec"><h3>New Arrivals</h3>${newest.map(b=>`<div class="arr">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ${esc(b.edition||'—')}</small></div><button class="btn pill" data-action="viewBook" data-id="${b.id}">View</button></div>`).join('')}</div></div>
-  <div class="card" style="margin-top:1rem"><h3 style="margin:0 0 .5rem">Borrowing Rules</h3><ul class="check"><li>Loan period: <b>${LOAN_DAYS} Days</b>.</li><li>Up to ${MAX_LOANS} books at a time.</li><li>Late returns cost ₱${FINE_PER_DAY} per day.</li></ul><button class="link" data-action="go" data-key="rules" style="margin-top:.5rem">Read all library rules</button></div>`;
+  <div class="pair-grid dash-loans"><div class="v-sec"><h3>My Current Loans</h3><div class="table-wrap">${loanTable(L)}</div></div>
+  <div class="v-sec"><h3>New Arrivals</h3>${newest.map(b=>`<div class="arr">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ${esc(b.edition||'—')}</small></div><button class="btn sm" data-action="viewBook" data-id="${b.id}">View</button></div>`).join('')}</div></div>`;
 }
 function pageBrowse(){
   return phead('Browse Books', 'Find a title, check availability and place a hold.', '', 'Search title, author or genre…', 'Search books') + `
@@ -400,9 +432,9 @@ function pageProfile(){
       <h3 class="sub-h">Current Loans</h3><div class="table-wrap">${loanTable(L)}</div>`,
     history: () => historyPanel(state.studentId, false),
     details: () => `<div id="prof-details">${srow('Student ID','Assigned by the library',esc(u.sid))}${srow('Full name','Contact the library to change',esc(u.name))}${srow('College','',esc(COLLEGES[u.college]||'—'))}${srow('Role','',`<span class="badge">${esc(u.role)}</span>`)}
-      ${srow('Email address','Used for library notices',sin('Email address','email',u.email,'email'))}${srow('Contact number','For pickup and overdue notices',sin('Contact number','phone',u.phone||'','tel'))}<div class="set-foot"><button class="btn" data-action="saveProfile">Save Changes</button></div></div>`,
+      ${srow('Email address','Used for library notices',sin('Email address','email',u.email,'email'))}${srow('Contact number','For pickup and overdue notices',sin('Contact number','phone',u.phone||'','tel'))}<div class="set-foot"><button class="btn" data-action="saveProfile">Save changes</button></div></div>`,
     security: () => `<div id="prof-pass">${srow('Current password','',sin('Current password','current','','password'))}${srow('New password','At least 6 characters',sin('New password','next','','password'))}${srow('Confirm new password','Re-enter the new password',sin('Confirm password','confirm','','password'))}
-      <div class="set-foot"><button class="btn" data-action="changePassword">Update Password</button></div></div>`
+      <div class="set-foot"><button class="btn" data-action="changePassword">Update password</button></div></div>`
   };
   return `<div class="p-hero"><div class="avatar-lg">${esc(ini)}</div><div class="p-id"><h2>${esc(u.name)}</h2><p>${esc(u.sid)} · ${esc(u.email)}</p>
       <p><span class="chip">${esc(u.role)}</span><span class="chip">${esc(u.college||'—')}</span>${esc(COLLEGES[u.college]||'')}</p></div>
@@ -446,7 +478,7 @@ function pageRequests(){
   const admin = state.role === 'admin', list = state.requests.filter(r => admin || r.by === STAFF.name).sort((a,b) => b.id - a.id);
   const cls = {Pending:'soon', Approved:'ok', Rejected:'late'};
   return `<div class="page-head"><h2>${admin?'Book Requests':'My Book Requests'}</h2><span class="badge soon">${list.filter(r=>r.status==='Pending').length} pending</span>${admin?'':`<span class="badge ok">${list.filter(r=>r.status==='Approved').length} approved</span><span class="badge late">${list.filter(r=>r.status==='Rejected').length} rejected</span>`}
-    ${admin?'':`<button class="btn pill" data-action="addBook">${I.plus} New Request</button>`}</div>
+    ${admin?'':`<button class="btn pill" data-action="addBook">${I.plus} New request</button>`}</div>
     ${admin ? '' : requestTracker(list)}
     <div class="card"><div class="table-wrap">${!list.length?'<div class="empty">No requests yet.</div>':`<table><thead><tr><th>ID</th><th>Title</th><th>Author</th><th>ISBN</th><th>Qty</th><th>Submitted By</th><th>Date</th><th>Status</th><th>Review</th></tr></thead><tbody>
     ${list.map(r=>`<tr><td>${r.id}</td><td>${esc(r.title)}</td><td>${esc(r.author)}</td><td>${esc(r.isbn)}</td><td>${r.total}</td><td>${esc(r.by)}</td><td>${r.date}</td><td><span class="badge ${cls[r.status]}">${r.status}</span></td>
@@ -457,19 +489,22 @@ function pageStaffAccount(){
   const ini = STAFF.name.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase(), t = state.staffTab || 'details';
   const body = {
     details: () => `<div id="staff-details">${srow('Display name','Shown on your book requests',sin('Display name','name',STAFF.name))}${srow('Username','Used to log in',esc(STAFF.username))}${srow('Role','Can submit books for Admin approval',`<span class="badge">Staff</span>`)}
-      <div class="set-foot"><button class="btn" data-action="saveStaffName">Save Changes</button></div></div>`,
+      <div class="set-foot"><button class="btn" data-action="saveStaffName">Save changes</button></div></div>`,
     password: () => `<div id="staff-pass">${srow('Current password','',sin('Current password','current','','password'))}${srow('New password','At least 6 characters',sin('New password','next','','password'))}${srow('Confirm new password','Re-enter the new password',sin('Confirm password','confirm','','password'))}
-      <div class="set-foot"><button class="btn" data-action="changeStaffPassword">Update Password</button></div></div>`
+      <div class="set-foot"><button class="btn" data-action="changeStaffPassword">Update password</button></div></div>`
   };
   return `<div class="p-hero"><div class="avatar-lg">${esc(ini)}</div><div class="p-id"><h2>${esc(STAFF.name)}</h2><p>Library Staff · @${esc(STAFF.username)}</p><p><span class="chip">Staff</span></p></div>
     <div class="p-meter"><small>My book requests</small><b>${n('Pending')} pending</b><small>${n('Approved')} approved · ${n('Rejected')} rejected</small></div></div>
   <section class="panel" style="margin-top:1rem"><div class="tabs" role="tablist">${[['details','Account Details'],['password','Password & Security']].map(([k,l])=>`<button role="tab" data-action="staffTab" data-tab="${k}" aria-selected="${t===k}">${l}</button>`).join('')}</div>${body[t]()}</section>`;
 }
+const filterVisitors = q => { q = (q || '').trim().toLowerCase(); const v = [...state.visits].sort((a, b) => b.id - a.id); return q ? v.filter(x => [x.id, x.name, x.purpose, x.time].join(' ').toLowerCase().includes(q)) : v; };
+const visitorTable = list => !list.length ? '<div class="empty">No visitors match your search.</div>'
+  : `<table><thead><tr><th>ID</th><th>Name</th><th>Purpose</th><th>Date &amp; Time</th></tr></thead><tbody>${list.map(x => `<tr><td>${x.id}</td><td>${esc(x.name)}</td><td>${esc(x.purpose)}</td><td>${x.time}</td></tr>`).join('')}</tbody></table>
+    <div class="tbl-foot">Showing ${list.length} visitor${list.length === 1 ? '' : 's'}</div>`;
 function pageVisitors(){
-  const v = [...state.visits].sort((a,b) => b.id - a.id), today = addDays(0);
-  return `<div class="page-head"><h2>Visitor Log</h2><span class="badge">${v.filter(x=>x.time.startsWith(today)).length} today</span><span class="badge gray">${v.length} total</span></div>
-    <div class="card"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Purpose</th><th>Date &amp; Time</th></tr></thead><tbody>
-    ${v.map(x=>`<tr><td>${x.id}</td><td>${esc(x.name)}</td><td>${esc(x.purpose)}</td><td>${x.time}</td></tr>`).join('')}</tbody></table></div></div>`;
+  const today = addDays(0), n = state.visits.filter(x => x.time.startsWith(today)).length;
+  return phead('Visitor Log', `${n} today · ${state.visits.length} total`, '', 'Search visitors…', 'Search visitors') + `
+    <div class="card"><div class="table-wrap" id="book-list">${visitorTable(filterVisitors(state.search))}</div></div>`;
 }
 function pageVisitorHome(){
   const v = findBook(state.visitId, state.visits) || {purpose:'—', time:'—'}, now = new Date(), day = now.getDay(), hr = now.getHours() + now.getMinutes()/60;
@@ -477,18 +512,16 @@ function pageVisitorHome(){
   const HOURS = [['Monday – Friday','8:00 AM – 5:00 PM',[1,2,3,4,5]],['Saturday','8:00 AM – 12:00 NN',[6]],['Sunday & holidays','Closed',[0]]];
   const newest = [...state.books].sort((a,b) => b.id - a.id).slice(0,3);
   const facts = [[state.books.length,'Titles in catalog'],[state.books.filter(b=>b.available>0).length,'Available now'],[new Set(state.books.map(b=>b.genre)).size,'Genres']];
-  return `<div class="p-hero"><div class="p-id"><h2>Enjoy your visit</h2><p>We are glad you are here. Take your time and enjoy the library.</p>
-      <p><span class="chip"><span class="dot ${open?'':'off'}"></span>${open?'Open now':'Closed now'}</span><span class="chip">${esc(v.purpose)}</span><span class="chip">Checked in ${esc(v.time)}</span></p></div>
-    <button class="btn light" data-action="go" data-key="browse">Browse Books</button></div>
-  <div class="v-grid"><div>
-    <div class="v-sec"><h3>The Library at a Glance</h3><div class="stat-strip">${facts.map(([n,l])=>`<div><b>${n}</b><small>${l}</small></div>`).join('')}</div></div>
-    <div class="v-sec"><h3>New Arrivals</h3>${newest.map(b=>`<div class="arr">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ${esc(b.edition||'—')}</small></div>
-      <button class="btn pill" data-action="viewBook" data-id="${b.id}">View</button></div>`).join('')||'<p class="muted">No books yet.</p>'}</div>
-  </div><div>
-    <div class="v-sec"><h3>Library Hours</h3><ul class="hours">${HOURS.map(([d,t,days])=>`<li class="${days.includes(day)?'today':''}"><span>${d}${days.includes(day)?' (today)':''}</span><span>${t}</span></li>`).join('')}</ul></div>
-    <div class="v-sec"><h3>Visitor Guidelines</h3><ul class="check"><li>Books are for reading inside the library.</li><li>Keep quiet and keep food and drinks outside.</li><li>Ask the librarian if you need help finding a book.</li></ul></div>
-    <div class="v-sec"><h3>Need Help?</h3><p style="margin:0">Call the Computer Services Department at <b>(+63) 1234-5678</b>. To borrow books, ask the librarian about a student account.</p></div>
-  </div></div>`;
+  return `<div class="page-head dash-head"><div class="ph-t"><h2>Enjoy your visit</h2><p>We are glad you are here. Take your time and enjoy the library.</p></div>
+    <div class="ph-act"><button class="btn" data-action="go" data-key="browse">Browse books</button></div></div>
+  <div class="chip-row"><span class="chip"><span class="dot ${open?'':'off'}"></span>${open?'Open now':'Closed now'}</span><span class="chip">${esc(v.purpose)}</span><span class="chip">Checked in ${esc(v.time)}</span></div>
+  <div class="vis-grid">
+    <div class="v-sec a-glance"><h3>The Library at a Glance</h3><div class="stat-strip">${facts.map(([n,l])=>`<div><b>${n}</b><small>${l}</small></div>`).join('')}</div></div>
+    <div class="v-sec a-hours"><h3>Library Hours</h3><ul class="hours">${HOURS.map(([d,t,days])=>`<li class="${days.includes(day)?'today':''}"><span>${d}${days.includes(day)?' (today)':''}</span><span>${t}</span></li>`).join('')}</ul></div>
+    <div class="v-sec a-arrivals"><h3>New Arrivals</h3>${newest.map(b=>`<div class="arr">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ${esc(b.edition||'—')}</small></div><button class="btn sm" data-action="viewBook" data-id="${b.id}">View</button></div>`).join('')||'<p class="muted">No books yet.</p>'}</div>
+    <div class="v-sec a-guide"><h3>Visitor Guidelines</h3><ul class="check"><li>Books are for reading inside the library.</li><li>Keep quiet and keep food and drinks outside.</li><li>Ask the librarian if you need help finding a book.</li></ul></div>
+    <div class="v-sec a-help"><h3>Need Help?</h3><p>Call the Computer Services Department at <b>(+63) 1234-5678</b>. To borrow books, ask the librarian about a student account.</p></div>
+  </div>`;
 }
 function seedRequests(){ return [
   {id:1,isbn:'978-4-08-880006-6',title:'Chainsaw Man, Vol. 6',author:'Tatsuki Fujimoto',genre:'Manga',edition:'1st Edition',synopsis:'Missing volume in the run. Requested so readers can follow the series without a gap between Vol. 5 and Vol. 7.',total:3,by:STAFF.name,date:addDays(-1),status:'Pending',reason:''},
@@ -542,7 +575,7 @@ function pageSettings(){
       srow('Fine per overdue day','Amount in pesos (₱)',sin('Fine per day','fine',FINE_PER_DAY,'number')) +
       srow('Loan period','Fixed by library policy',`<span class="badge">${LOAN_DAYS} days (fixed)</span>`) +
       srow('Max books per student','Borrowing stops at this limit',sin('Max books','maxLoans',MAX_LOANS,'number')),
-      '<button class="btn" data-action="saveRules">Save Rules</button>'),
+      '<button class="btn" data-action="saveRules">Save rules</button>'),
     account: () => panel('set-account','Account','Manage your name and password.',
       srow('Display name','Shown in the top bar',sin('Display name','name',ADMIN.name)) +
       srow('Role','Set by the system',`<span class="badge">${ROLE_LABEL[state.role]}</span>`) +
@@ -550,22 +583,20 @@ function pageSettings(){
       srow('Current password','',sin('Current password','current','','password')) +
       srow('New password','At least 6 characters',sin('New password','next','','password')) +
       srow('Confirm new password','Re-enter the new password',sin('Confirm password','confirm','','password')),
-      '<button class="btn" data-action="saveAccount">Update Account</button>'),
+      '<button class="btn" data-action="saveAccount">Update account</button>'),
     display: () => panel('set-display','Display','Changes apply immediately.',
       srow('Theme','Light or dark appearance',themeSeg()) +
       srow('Text size','Make text easier to read',`<div class="seg" role="group" aria-label="Text size">${['small','normal','large'].map(k=>`<button data-action="setTextSize" data-size="${k}" aria-pressed="${state.textSize===k}">${k[0].toUpperCase()+k.slice(1)}</button>`).join('')}</div>`) +
       '<p class="preview">Preview: Books are returned at the library desk.</p>'),
     data: () => panel('set-data','Data','What is stored in this browser.',
       `<div class="stat-strip">${[['Books',state.books.length],['Archived',state.archived.length],['Users',state.users.length],['Loans',state.loans.length]].map(([l,v])=>`<div><b>${v}</b><small>${l}</small></div>`).join('')}</div>` +
-      srow('Reset sample data','Restores the original books, users, loans and requests. Rules and account settings are kept.','<button class="btn red" data-action="resetData">Reset Sample Data</button>'))
+      srow('Reset sample data','Restores the original books, users, loans and requests. Rules and account settings are kept.','<button class="btn red" data-action="resetData">Reset sample data</button>'))
   };
   return `<div class="set-layout"><nav class="set-nav" role="tablist" aria-label="Settings sections">${SET_TABS.map(([k,l])=>`<button role="tab" data-action="settingsTab" data-tab="${k}" aria-selected="${t===k}">${l}</button>`).join('')}</nav>${P[t]()}</div>`;
 }
 
 const pad = n => String(n).padStart(4, '0');
 const addFrom = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0,10); };
-const stLabel = l => l.status === 'Borrowed' ? 'Issued' : l.status;
-const stCls = l => l.status === 'Overdue' ? 'late' : l.status === 'Due Soon' ? 'soon' : '';
 function issueRows(q = ''){
   q = q.trim().toLowerCase();
   const L = state.loans.filter(isActive).map(l => ({...l, ...loanInfo(l), book: findBook(l.bookId, state.books) || findBook(l.bookId, state.archived) || {title:'(removed book)', author:'—'}, user: findBook(l.uid, state.users) || {name:'(removed user)', sid:'—', phone:''}}));
@@ -573,18 +604,16 @@ function issueRows(q = ''){
 }
 function issueTable(L){
   if (!L.length) return `<div class="empty">No books are on loan.</div>`;
-  return `<table><thead><tr><th>Loan</th><th>Borrower</th><th>Contact No.</th><th>Book</th><th>Issued</th><th>Due</th><th>Status</th><th>Fine</th><th>Slip</th></tr></thead><tbody>
-  ${L.map(l => `<tr><td>${pad(l.id)}</td><td class="cell-l"><b>${esc(l.user.name)}</b><br><small>${esc(l.user.sid)}</small></td>
-    <td>${l.user.phone ? `<a class="tel" href="tel:${l.user.phone.replace(/\s/g,'')}">${esc(l.user.phone)}</a>` : '—'}</td>
-    <td class="cell-l"><div class="t-cell">${thumb(l.book)}<span>${esc(l.book.title)}<br><small>${esc(l.book.author)}</small></span></div></td><td>${l.borrowed}</td><td>${l.due}</td>
+  return `<table class="issue-tbl"><thead><tr><th>Loan</th><th>Borrower</th><th>Book</th><th>Issued</th><th>Due</th><th>Status</th><th>Fine</th><th>Slip</th></tr></thead><tbody>
+  ${L.map(l => `<tr><td>${pad(l.id)}</td><td class="cell-l"><b>${esc(l.user.name)}</b><br><small>${esc(l.user.sid)}${l.user.phone ? ` · <a class="tel" href="tel:${l.user.phone.replace(/\s/g,'')}">${esc(l.user.phone)}</a>` : ''}</small></td>
+    <td class="cell-l"><div class="t-cell">${thumb(l.book)}<span>${esc(l.book.title)}<br><small>${esc(l.book.author)}</small></span></div></td><td>${fmtD(l.borrowed)}</td><td>${fmtD(l.due)}</td>
     <td><span class="badge ${stCls(l)}">${stLabel(l)}</span></td><td>${l.fine ? `₱${l.fine.toFixed(2)}<br><small>${l.days} day${l.days === 1 ? '' : 's'} late</small>` : '—'}</td>
-    <td><button class="icon-btn" data-action="slip" data-id="${l.id}" aria-label="Issue slip ${pad(l.id)}" title="Issue slip">${I.view}</button></td></tr>`).join('')}</tbody></table>`;
+    <td><button class="btn gray sm" data-action="slip" data-id="${l.id}" aria-label="View issue slip ${pad(l.id)}">View slip</button></td></tr>`).join('')}</tbody></table>`;
 }
 function pageIssue(){
   const R = issueRows(''), t = addDays(0), n = f => R.filter(f).length;
-  const kpi = [[R.length,'Books on loan'],[n(l=>l.borrowed===t),'Issued today'],[n(l=>l.status==='Due Soon'),'Due within 3 days'],[n(l=>l.status==='Overdue'),'Overdue']];
-  return `<div class="page-head"><h2>Issue of Books</h2><button class="btn pill" data-action="issueBook">${I.plus} Issue Book</button>
-    <label class="search">${I.search}<input id="search" type="search" placeholder="Search borrower, book or number" value="${esc(state.search)}" aria-label="Search loans"></label></div>
+  const kpi = [[R.length,'Books on loan'],[n(l=>l.borrowed===t),'Issued today'],[n(l=>l.status==='Due Soon'||l.status==='Due Today'),'Due today or tomorrow'],[n(l=>l.status==='Overdue'),'Overdue']];
+  return phead('Issue of Books', 'Issue books to borrowers and track what is due.', `<button class="btn" data-action="issueBook">${I.plus} Issue book</button>`, 'Search borrower, book or number', 'Search loans') + `
     ${kpiCards(kpi)}
     <div class="card"><div class="table-wrap" id="book-list">${issueTable(issueRows(state.search))}</div></div>`;
 }
@@ -625,7 +654,7 @@ function issueRefresh(){
     h = `<div class="bcard"><div class="bc-top"><span class="ini">${esc(u.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase())}</span><div><b>${esc(u.name)}</b><small>${esc(u.sid)} · ${esc(u.phone || 'no contact number')}</small></div>
       <span class="badge ${od?'late':full?'soon':'ok'}">${od?'Overdue':full?'At limit':'Can borrow'}</span></div>
       <div class="bar" role="img" aria-label="${pct}% of borrowing limit used"><i style="width:${pct}%"></i></div><small>${L.length} of ${MAX_LOANS} books borrowed</small>
-      ${L.length ? `<ul class="bc-loans">${L.map(l=>`<li>${esc(l.book.title)} <small>due ${l.due}${l.status==='Overdue'?' · overdue':''}</small></li>`).join('')}</ul>` : ''}</div>`; }
+      ${L.length ? `<ul class="bc-loans">${L.map(l=>`<li>${esc(l.book.title)} <small>due ${fmtD(l.due)}${l.status==='Overdue'?' · overdue':''}</small></li>`).join('')}</ul>` : ''}</div>`; }
   if (b) h += `<div class="bcard"><div class="bc-top">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ISBN ${esc(b.isbn)}</small></div><span class="badge ${b.available > 0 ? 'ok' : 'soon'}">${b.available} of ${b.total} on shelf${b.available < 1 && u && heldFor(b, u.id) ? ' · held' : ''}</span></div></div>`;
   h += [u && e.uid, b && e.bookId].filter(Boolean).map(m => `<div class="alert warn">${esc(m)}</div>`).join('');
   $('#iss-info').innerHTML = h;
@@ -641,7 +670,7 @@ function lookupResults(q){
 const slipHtml = id => {
   const l = state.loans.find(x => x.id === +id), i = loanInfo(l), b = findBook(l.bookId, state.books) || findBook(l.bookId, state.archived) || {title:'(removed book)', author:'—'}, u = findBook(l.uid, state.users) || {name:'(removed user)', sid:'—'};
   return `<h2>Issue Slip ${pad(l.id)}</h2><div class="detail">${cover(b)}<div class="facts"><div><b>Borrower:</b>${esc(u.name)}</div><div><b>ID:</b>${esc(u.sid)}</div><div><b>Contact No.:</b>${esc(u.phone||'—')}</div>
-    <div><b>Book:</b>${esc(b.title)}</div><div><b>Author:</b>${esc(b.author)}</div><div><b>Issued:</b>${l.borrowed}</div><div><b>Due:</b>${l.due}</div><div><b>Status:</b>${stLabel({status:i.status})}</div><div><b>Issued by:</b>${esc(l.by||'—')}</div></div></div>
+    <div><b>Book:</b>${esc(b.title)}</div><div><b>Author:</b>${esc(b.author)}</div><div><b>Issued:</b>${fmtD(l.borrowed)}</div><div><b>Due:</b>${fmtD(l.due)}</div><div><b>Status:</b>${stLabel({status:i.status})}</div><div><b>Issued by:</b>${esc(l.by||'—')}</div></div></div>
     <p class="muted" style="margin-top:.8rem">Late returns are fined ₱${FINE_PER_DAY} per day.</p><div class="actions"><button class="btn" data-action="closeModal">Close</button></div>`;
 };
 
@@ -667,7 +696,7 @@ function catalogCards(q = ''){
 function pageCatalog(){
   const all = state.books, sorts = [['title','Title'],['author','Author'],['genre','Subject']];
   const groups = [...new Set(all.map(catGroup))].sort();
-  return `<div class="page-head"><h2>Card Catalog</h2><label class="search">${I.search}<input id="search" type="search" placeholder="Search the drawer" value="${esc(state.search)}" aria-label="Search catalog"></label></div>
+  return phead('Card Catalog', 'Browse the collection the way a card drawer is filed.', '', 'Search the drawer', 'Search catalog') + `
     <div class="cat-bar"><div class="seg" role="group" aria-label="File cards by">${sorts.map(([k,l])=>`<button data-action="catSort" data-sort="${k}" aria-pressed="${state.catSort===k}">${l}</button>`).join('')}</div>
     <div class="cat-tabs" role="group" aria-label="Drawer index">${[['','All'],...groups.map(g=>[g,g])].map(([g,l])=>`<button data-action="catPick" data-g="${esc(g)}" aria-pressed="${state.catGroup===g}">${esc(l)}</button>`).join('')}</div></div>
     <p class="muted" style="margin:.2rem 0 1rem">Filed by ${state.catSort==='genre'?'subject':state.catSort}. Turn a card over to read the synopsis.</p>
@@ -685,7 +714,7 @@ const ROUTES = [
   {key:'user',      label:'User',          title:()=>'', render:pageUsers, table:q=>userTable(filterUsers(q))},
   {key:'issue',     label:'Book Issue',    title:()=>'', render:pageIssue, table:q=>issueTable(issueRows(q))},
   {key:'return',    label:'Book Return',   title:()=>'Book Return', render:pageReturn},
-  {key:'visitors',  label:'Visitors',      title:()=>'', render:pageVisitors},
+  {key:'visitors',  label:'Visitors',      title:()=>'', render:pageVisitors, table:q=>visitorTable(filterVisitors(q))},
   {key:'settings',  label:'Settings',      title:()=>'Settings', render:pageSettings}
 ];
 const STUDENT_ROUTES = [
@@ -698,7 +727,7 @@ const STAFF_ROUTES = [
   {key:'dashboard', label:'Dashboard',        title:()=>`Welcome, ${state.user}!`, render:pageDashboard},
   {key:'inventory', label:'Inventory',        title:()=>'', render:pageInventory, list:()=>state.books, actions:[INV_ACTIONS[0]]},
   {key:'requests',  label:'My Book Requests', title:()=>'', render:pageRequests},
-  {key:'visitors',  label:'Visitors',         title:()=>'', render:pageVisitors},
+  {key:'visitors',  label:'Visitors',         title:()=>'', render:pageVisitors, table:q=>visitorTable(filterVisitors(q))},
   {key:'account',   label:'Account',          title:()=>'', render:pageStaffAccount}
 ];
 const VISITOR_ROUTES = [
@@ -741,25 +770,32 @@ function viewRegister(){
   return `<div class="login">${themeBtn('theme-fab')}${left}<div class="login-right"><div class="login-form reg" id="reg-form"><h1>Create your account</h1><p>Register with your student details. A librarian will verify them.</p>
     ${field('Student ID (e.g. 12-34567-890)','sid')}${field('Full Name','name')}${field('Institutional Email','email','','email','you@school.edu')}${sel('College','college',Object.keys(COLLEGES))}
     ${field('Password','password','','password')}${field('Confirm Password','confirm','','password')}
-    ${termsRow('student')}<button class="btn" data-action="submitReg" data-needs-terms="student" ${state.agreed.student?'':'disabled'}>Submit Registration</button><button class="link" data-action="goLogin">Back to log in</button></div></div></div>`;
+    ${termsRow('student')}<button class="btn" data-action="submitReg" data-needs-terms="student" ${state.agreed.student?'':'disabled'}>Submit registration</button><button class="link" data-action="goLogin">Back to log in</button></div></div></div>`;
 }
 function validateReg(v){
   const e = {}, sid = v.sid.trim();
   if (!/^\d{2}-\d{5}-\d{3}$/.test(sid)) e.sid = 'Use the format 12-34567-890';
   else if (state.users.some(u => u.sid === sid) || state.regs.some(r => r.sid === sid && r.status === 'Pending')) e.sid = 'This Student ID is already registered';
-  if (v.name.trim().length < 2) e.name = 'Full Name cannot be empty';
+  if (v.name.trim().length < 2) e.name = 'Full name cannot be empty';
   if (!/^[^\s@]+@[^\s@]+\.edu(\.[a-z]{2})?$/i.test(v.email.trim())) e.email = 'Use your institutional email (ends in .edu)';
   if (!COLLEGES[v.college]) e.college = 'Select a college';
   if (v.password.length < 6) e.password = 'Use at least 6 characters';
   if (v.confirm !== v.password) e.confirm = 'Passwords do not match';
   return e;
 }
+const filterRegs = q => { q = (q || '').trim().toLowerCase(); const L = [...state.regs].sort((a, b) => b.id - a.id); return q ? L.filter(r => [r.name, r.sid, r.email, r.college, r.date, r.status, r.reason, r.reviewedBy].join(' ').toLowerCase().includes(q)) : L; };
+const regTable = list => {
+  const cls = {Pending:'soon', Approved:'ok', Rejected:'late'};
+  if (!list.length) return `<div class="empty">${state.regs.length ? 'No registrations match your search.' : 'No registrations yet.'}</div>`;
+  return `<table><thead><tr><th>Student</th><th>Student ID</th><th>Email</th><th>College</th><th>Submitted</th><th>Status</th><th>Review</th></tr></thead><tbody>
+    ${list.map(r => `<tr><td class="cell-l"><b>${esc(r.name)}</b></td><td>${esc(r.sid)}</td><td>${esc(r.email)}</td><td>${esc(r.college)}</td><td>${r.date}</td><td><span class="badge ${cls[r.status]}">${r.status}</span></td>
+      <td>${r.status === 'Pending' ? `<button class="btn ok sm" data-action="approveReg" data-id="${r.id}">Approve</button> <button class="btn red sm" data-action="rejectReg" data-id="${r.id}">Reject</button>` : esc(r.reason || (r.reviewedBy ? 'by ' + r.reviewedBy : '—'))}</td></tr>`).join('')}</tbody></table>
+    <div class="tbl-foot">Showing ${list.length} registration${list.length === 1 ? '' : 's'}</div>`;
+};
 function pageRegs(){
-  const L = [...state.regs].sort((a,b) => b.id - a.id), cls = {Pending:'soon', Approved:'ok', Rejected:'late'};
-  return `<div class="page-head"><h2>Student Registrations</h2><span class="badge soon">${L.filter(r=>r.status==='Pending').length} pending</span></div>
-    <div class="card"><div class="table-wrap">${!L.length ? '<div class="empty">No registrations yet.</div>' : `<table><thead><tr><th>Student</th><th>Student ID</th><th>Email</th><th>College</th><th>Submitted</th><th>Status</th><th>Review</th></tr></thead><tbody>
-    ${L.map(r => `<tr><td class="cell-l"><b>${esc(r.name)}</b></td><td>${esc(r.sid)}</td><td>${esc(r.email)}</td><td>${esc(r.college)}</td><td>${r.date}</td><td><span class="badge ${cls[r.status]}">${r.status}</span></td>
-      <td>${r.status === 'Pending' ? `<button class="btn ok sm" data-action="approveReg" data-id="${r.id}">Approve</button> <button class="btn red sm" data-action="rejectReg" data-id="${r.id}">Reject</button>` : esc(r.reason || (r.reviewedBy ? 'by ' + r.reviewedBy : '—'))}</td></tr>`).join('')}</tbody></table>`}</div></div>`;
+  const pend = state.regs.filter(r => r.status === 'Pending').length;
+  return phead('Student Registrations', `${pend} pending · ${state.regs.length} total`, '', 'Search name, ID, email or college…', 'Search registrations') + `
+    <div class="card"><div class="table-wrap" id="book-list">${regTable(filterRegs(state.search))}</div></div>`;
 }
 
 /* --- reservations --- */
@@ -767,7 +803,7 @@ const left = ts => { const ms = ts - Date.now(); return ms <= 0 ? 'Expired' : `$
 const myResv = b => state.resv.find(r => r.bookId === b.id && r.uid === state.studentId && ['Waiting','Ready'].includes(r.status));
 function holdBtn(b, pill){
   const r = myResv(b);
-  if (r) return `<span class="badge ${r.status === 'Ready' ? 'ok' : 'soon'}">${r.status === 'Ready' ? 'Ready for pickup' : 'Reserved'}</span>`;
+  if (r) return `<span class="badge ${r.status === 'Ready' ? 'ok' : 'soon'}">${r.status === 'Ready' ? 'Ready for pickup' : 'Reserved'}</span> <button class="${pill ? 'btn pill' : 'btn'} gray sm" data-action="cancelResv" data-id="${r.id}" aria-label="Cancel reservation for ${esc(b.title)}">Cancel</button>`;
   const free = b.available > 0;
   return `<button class="${pill ? 'btn pill' : 'btn'} ${free ? 'ok' : 'amber'}" data-action="reserveBook" data-id="${b.id}">${free ? 'Place Hold' : 'Reserve Book'}</button>`;
 }
@@ -784,7 +820,7 @@ function pageResv(){
   const cls = {Waiting:'gray', Ready:'ok', Collected:'', Expired:'late', Cancelled:'gray'}, kpi = [[n('Waiting'),'Waiting in queue'],[n('Ready'),'Ready for pickup'],[n('Collected'),'Collected'],[n('Expired'),'Expired']];
   return `<div class="page-head"><h2>Reservations</h2></div>
     ${kpiCards(kpi)}
-    <div class="card"><div class="table-wrap">${!L.length ? '<div class="empty">No reservations yet. Students can reserve a book once its copies run out.</div>' : `<table><thead><tr><th>Book</th><th>Student</th><th>Contact No.</th><th>Reserved</th><th>Queue</th><th>Status</th><th>Pickup deadline</th><th>Actions</th></tr></thead><tbody>
+    <div class="card"><div class="table-wrap">${!L.length ? emptyState('clock', 'No reservations yet', 'Holds and queue spots placed by students will appear here.') : `<table><thead><tr><th>Book</th><th>Student</th><th>Contact No.</th><th>Reserved</th><th>Queue</th><th>Status</th><th>Pickup deadline</th><th>Actions</th></tr></thead><tbody>
     ${L.map(r => { const b = findBook(r.bookId, state.books) || findBook(r.bookId, state.archived) || {title:'(removed)'}, u = findBook(r.uid, state.users) || {name:'(removed)', sid:'—', phone:''}, pos = queue.filter(x => x.bookId === r.bookId).findIndex(x => x.id === r.id) + 1;
       return `<tr><td class="cell-l"><b>${esc(b.title)}</b></td><td class="cell-l"><b>${esc(u.name)}</b><br><small>${esc(u.sid)}</small></td><td>${esc(u.phone || '—')}</td><td>${r.date}</td><td>${r.status === 'Waiting' ? '#' + pos : '—'}</td>
       <td><span class="badge ${cls[r.status]}">${r.status}</span></td><td>${r.status === 'Ready' ? `<span data-exp="${r.expiresAt}">${left(r.expiresAt)}</span>` : '—'}</td>
@@ -792,11 +828,12 @@ function pageResv(){
 }
 function resvCard(){
   const L = state.resv.filter(r => r.uid === state.studentId).sort((a,b) => b.id - a.id);
-  return `<div class="card" style="margin-top:1rem"><h2>Reservations</h2><div class="table-wrap">${!L.length ? '<div class="empty">You have no reservations.</div>' : `<table><thead><tr><th>Book</th><th>Reserved</th><th>Status</th><th>Pickup deadline</th><th>Cancel</th></tr></thead><tbody>
+  return `<div class="card" style="margin-top:1rem"><h2>Reservations</h2><div class="table-wrap">${!L.length ? emptyState('clock', 'No reservations yet', 'Hold a book from Browse Books and it will show up here.', '<button class="btn sm" data-action="go" data-key="browse">Browse books</button>') : `<table class="resv-tbl"><thead><tr><th>Book</th><th>Reserved</th><th>Status</th><th>Pickup deadline</th><th>Cancel</th></tr></thead><tbody>
     ${L.map(r => { const b = findBook(r.bookId, state.books) || findBook(r.bookId, state.archived) || {title:'(removed)'}, act = ['Waiting','Ready'].includes(r.status);
-      return `<tr><td class="cell-l">${esc(b.title)}</td><td>${r.date}</td><td><span class="badge ${r.status==='Ready'?'ok':r.status==='Waiting'?'gray':r.status==='Expired'?'late':''}">${r.status==='Ready'?'Ready for pickup':r.status}</span></td>
-      <td>${r.status === 'Ready' ? `<span data-exp="${r.expiresAt}">${left(r.expiresAt)}</span>` : '—'}</td><td>${act ? `<button class="icon-btn" data-action="cancelResv" data-id="${r.id}" aria-label="Cancel reservation for ${esc(b.title)}" title="Cancel">${I.x}</button>` : ''}</td></tr>`; }).join('')}</tbody></table>`}</div></div>`;
+      return `<tr><td class="cell-l" data-label="Book">${esc(b.title)}</td><td data-label="Reserved">${r.date}</td><td data-label="Status"><span class="badge ${r.status==='Ready'?'ok':r.status==='Waiting'?'gray':r.status==='Expired'?'late':''}">${r.status==='Ready'?'Ready for pickup':r.status}</span></td>
+      <td data-label="Pickup deadline">${r.status === 'Ready' ? `<span data-exp="${r.expiresAt}">${left(r.expiresAt)}</span>` : '—'}</td><td data-label="Cancel">${act ? `<button class="btn gray sm" data-action="cancelResv" data-id="${r.id}" aria-label="Cancel reservation for ${esc(b.title)}">Cancel</button>` : ''}</td></tr>`; }).join('')}</tbody></table>`}</div></div>`;
 }
+const emptyState = (ico, title, text, btn = '') => `<div class="empty rich"><span class="empty-ico" aria-hidden="true">${I[ico]}</span><b>${title}</b><p>${text}</p>${btn}</div>`;
 function pageMyBooks(){ return pageMyBooksBase() + resvCard(); }
 
 /* --- wishlist --- */
@@ -809,17 +846,18 @@ function wishBtn(b, full){
 function pageWishlist(){
   const L = wishList().map(id => findBook(id, state.books)).filter(Boolean);
   return `<div class="page-head"><h2>My Wishlist</h2><span class="badge">${L.length} saved</span></div>
-    <div class="card"><div class="table-wrap">${!L.length ? '<div class="empty">Nothing saved yet. Use the bookmark icon in Browse Books to keep titles for later.</div>' : `<table><thead><tr><th>Title</th><th>Author</th><th>Genre</th><th>Availability</th><th>View</th><th>Hold</th><th>Remove</th></tr></thead><tbody>
+    <div class="card"><div class="table-wrap">${!L.length ? emptyState('mark', 'Nothing saved yet', 'Use the bookmark icon in Browse Books to keep titles for later.', '<button class="btn sm" data-action="go" data-key="browse">Browse books</button>') : `<table><thead><tr><th>Title</th><th>Author</th><th>Genre</th><th>Availability</th><th>View</th><th>Hold</th><th>Remove</th></tr></thead><tbody>
     ${L.map(b => `<tr><td class="cell-l"><div class="t-cell">${thumb(b)}<span>${esc(b.title)}</span></div></td><td>${esc(b.author)}</td><td>${esc(b.genre)}</td><td><span class="badge ${b.available > 0 ? 'ok' : 'gray'}">${b.available > 0 ? b.available + ' available' : 'All out'}</span></td>
       <td><button class="icon-btn" data-action="viewBook" data-id="${b.id}" aria-label="View ${esc(b.title)}" title="View">${I.view}</button></td><td>${holdBtn(b, true)}</td><td>${wishBtn(b)}</td></tr>`).join('')}</tbody></table>`}</div></div>`;
 }
 
-const REG = {key:'registrations', label:'Registrations', title:()=>'', render:pageRegs, badge:() => state.regs.filter(r => r.status === 'Pending').length};
+const REG = {key:'registrations', label:'Registrations', title:()=>'', render:pageRegs, table:q=>regTable(filterRegs(q)), badge:() => state.regs.filter(r => r.status === 'Pending').length};
 const RESV = {key:'reservations', label:'Reservations', title:()=>'', render:pageResv, badge:() => state.resv.filter(r => ['Waiting','Ready'].includes(r.status)).length};
 const WISH = {key:'wishlist', label:'Wishlist', title:()=>'', render:pageWishlist};
 const insertAfter = (list, key, r) => list.splice(list.findIndex(x => x.key === key) + 1, 0, r);
 insertAfter(ROUTES, 'user', REG); insertAfter(ROUTES, 'issue', RESV);
 insertAfter(STAFF_ROUTES, 'requests', ROUTES.find(r => r.key === 'issue')); insertAfter(STAFF_ROUTES, 'issue', RESV); insertAfter(STAFF_ROUTES, 'reservations', REG);
+insertAfter(STAFF_ROUTES, 'reservations', ROUTES.find(r => r.key === 'return'));   // staff work the return desk too
 insertAfter(STUDENT_ROUTES, 'catalog', WISH);
 setInterval(() => document.querySelectorAll('[data-exp]').forEach(el => { el.textContent = left(+el.dataset.exp); }), 30000);
 document.addEventListener('click', e => { if (state.notesOpen && state.user && !e.target.closest('.notes-wrap')){ state.notesOpen = false; render(); } });
@@ -887,30 +925,36 @@ function viewLogin(){
     <div class="login-form"><h1>Welcome!</h1><p>${m==='visitor'?'Please sign in to the visitor log to proceed.':'Please enter your log in credentials to proceed.'}</p>
       ${fields}<span class="err" id="login-err" role="alert"></span>
       ${m==='visitor'?'':'<button class="link" data-action="forgot">Forgot password?</button>'}${m==='student'?'<button class="link" data-action="goRegister">New student? Create an account</button>':''}
-      <button class="btn" data-action="login" ${m==='visitor'?`data-needs-terms="visitor" ${state.agreed.visitor?'':'disabled'}`:''} style="margin-top:.8rem;padding:1rem">${m==='visitor'?'Enter Library':'Log in'}</button><small class="hint">${hints[m]}</small></div></div></div>`;
+      <button class="btn" data-action="login" ${m==='visitor'?`data-needs-terms="visitor" ${state.agreed.visitor?'':'disabled'}`:''} style="margin-top:.8rem;padding:1rem">${m==='visitor'?'Enter library':'Log in'}</button><small class="hint">${hints[m]}</small></div></div></div>`;
 }
 const NAV_ICON = {dashboard:'dashboard', catalog:'catalog', inventory:'inventory', requests:'requests', archive:'archive', user:'users', issue:'issue', return:'retn', visitors:'visitors', settings:'settings',
-  browse:'search', mybooks:'book', profile:'user', account:'user', home:'home', wishlist:'heart', reservations:'clock', registrations:'userplus'};
+  browse:'search', mybooks:'book', profile:'user', account:'user', home:'home', wishlist:'mark', reservations:'clock', registrations:'userplus'};
 const SELF_ROUTE = {admin:'settings', staff:'account', student:'profile'};
-const SEARCH_PH = {user:'Search users, IDs or emails…', issue:'Search borrowers or loans…'};
 const initials = n => String(n || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 let lastRouteKey = null;
+const NAV_GROUP = {dashboard:'Overview', issue:'Circulation', return:'Circulation', reservations:'Circulation', inventory:'Collection', catalog:'Collection', requests:'Collection', archive:'Collection', user:'People', registrations:'People', visitors:'People', rules:'System', settings:'System'};
+const NAV_ORDER = ['Overview','Circulation','Collection','People','System'];
+const navList = () => { const rs = routes(); if (state.role !== 'admin' && state.role !== 'staff') return rs; const gi = r => NAV_ORDER.indexOf(NAV_GROUP[r.key] || 'System'); return rs.map((r, i) => [r, i]).sort((a, b) => gi(a[0]) - gi(b[0]) || a[1] - b[1]).map(x => x[0]); };
 function viewShell(){
   const r = currentRoute(), enter = lastRouteKey !== r.key, col = state.collapsed, self = SELF_ROUTE[state.role]; lastRouteKey = r.key;
+  const grouped = state.role === 'admin' || state.role === 'staff'; let lastGrp = null;
   const tip = col ? 'Expand sidebar' : 'Collapse sidebar', searchable = !!(r.list || r.table);
+  if (state.searchFor !== r.key){ state.search = ''; state.stFilter = ''; state.roleFilter = ''; state.searchFor = r.key; }   // a search belongs to the section it was typed in (covers back/forward and direct links)
+  pageSearch = null; const body = r.render();
+  const gPh = searchable && pageSearch ? pageSearch.ph : 'Search books, authors or ISBN…', gLabel = searchable && pageSearch ? pageSearch.label : 'Search';
   const chip = `<${self ? 'button data-action="go" data-key="' + self + '"' : 'div'} class="profile-chip" ${self ? 'aria-label="Open my account"' : ''}><span class="pc-av" aria-hidden="true">${esc(initials(state.user))}</span><span class="pc-t"><b>${esc(state.user)}</b><small>${ROLE_LABEL[state.role]}</small></span></${self ? 'button' : 'div'}>`;
   return `<div class="shell ${state.navOpen ? 'open' : ''} ${col ? 'collapsed' : ''}"><div class="scrim" data-action="toggleNav"></div>
     <aside class="sidebar"><div class="brand"><span class="brand-mark" aria-hidden="true">${I.book}</span><span class="brand-name">Librio</span></div>
-      <div class="nav-label">${ROLE_LABEL[state.role]} menu</div>
-      <nav class="nav" aria-label="Main">${routes().map(n => { const bd = n.badge && n.badge(); return `<button data-action="go" data-key="${n.key}" ${col ? `title="${n.label}"` : ''} ${n.key === r.key ? 'aria-current="page"' : ''}>${I[NAV_ICON[n.key]] || I.book}<span class="nl">${n.label}</span>${bd ? `<span class="badge late">${bd}</span>` : ''}</button>`; }).join('')}</nav>
+      ${grouped ? '' : `<div class="nav-label">${ROLE_LABEL[state.role]} menu</div>`}
+      <nav class="nav" aria-label="Main">${navList().map(n => { const bd = n.badge && n.badge(), grp = grouped ? (NAV_GROUP[n.key] || 'System') : null, head = grp && grp !== lastGrp ? `<div class="nav-grp" role="presentation">${grp}</div>` : ''; lastGrp = grp; return head + `<button data-action="go" data-key="${n.key}" ${col ? `title="${n.label}"` : ''} ${n.key === r.key ? 'aria-current="page"' : ''}>${I[NAV_ICON[n.key]] || I.book}<span class="nl">${n.label}</span>${bd ? `<span class="badge late">${bd}</span>` : ''}</button>`; }).join('')}</nav>
       <div class="sb-foot"><button class="logout" data-action="logout" ${col ? 'title="Log Out"' : ''}>${I.logout}<span class="nl">Log Out</span></button></div></aside>
     <main class="main"><header class="topbar">
       <button class="tb-btn menu-btn" data-action="toggleNav" aria-label="Open menu">${I.menu}</button>
       <button class="tb-btn collapse-btn" data-action="toggleSidebar" aria-label="${tip}" aria-expanded="${!col}" title="${tip}">${I.panel}</button>
       <div class="crumb"><span class="crumb-root">Librio</span><span class="sep">/</span><h1>${esc(r.label)}</h1></div>
-      <label class="gsearch">${I.search}<input id="gsearch" type="search" placeholder="${SEARCH_PH[r.key] || 'Search books, authors or ISBN…'}" value="${searchable ? esc(state.search) : ''}" aria-label="Search" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
+      <label class="gsearch">${I.search}<input id="gsearch" type="search" placeholder="${esc(gPh)}" value="${searchable ? esc(state.search) : ''}" aria-label="${esc(gLabel)}" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
       ${themeBtn()}${bell()}${chip}</header>
-      <div class="page ${enter ? 'enter' : ''} ${searchable ? 'has-gs' : ''}">${r.render()}</div></main></div>`;
+      <div class="page ${enter ? 'enter' : ''} ${searchable ? 'has-gs' : ''}">${body}</div></main></div>`;
 }
 function render(){ reconcile(); $('#app').innerHTML = state.user ? viewShell() : state.authView === 'register' ? viewRegister() : viewLogin(); }
 
@@ -941,10 +985,10 @@ const ACTIONS = {
   forgot(){ toast('Please contact the Computer Services Department.'); },
   logout(){
     openModal(`<h2>Log Out</h2><p class="sub">Are you sure you want to log out?</p><p class="muted">Any unsaved changes will be lost.</p>
-      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn" data-action="confirmLogout">Log Out</button></div>`);
+      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn" data-action="confirmLogout">Log out</button></div>`);
   },
   confirmLogout(){ state.agreed = {}; state.rt = {}; location.hash = ''; state.user = null; state.navOpen = false; closeModal(); render(); },
-  go(el){ state.search = ''; state.stFilter = ''; state.navOpen = false; location.hash = el.dataset.key; },
+  go(el){ state.search = ''; state.stFilter = ''; state.roleFilter = ''; state.navOpen = false; location.hash = el.dataset.key; },
   toggleNav(){ state.navOpen = !state.navOpen; $('.shell').classList.toggle('open', state.navOpen); },
   toggleSidebar(){                       // desktop: collapse to an icon rail (kept across visits)
     state.collapsed = !state.collapsed; try { localStorage.setItem('librio-sidebar', state.collapsed ? '1' : '0'); } catch(e) {}
@@ -957,6 +1001,11 @@ const ACTIONS = {
     document.querySelectorAll('.chips button').forEach(b => b.setAttribute('aria-pressed', (b.dataset.s || '') === state.stFilter));
     const r = currentRoute(); $('#book-list').innerHTML = bookTable(filterBooks(r.list(), state.search), r.actions);
   },
+  setRole(el){                           // user role chips: update in place
+    state.roleFilter = el.dataset.r || '';
+    document.querySelectorAll('.chips button').forEach(b => b.setAttribute('aria-pressed', (b.dataset.r || '') === state.roleFilter));
+    $('#book-list').innerHTML = userTable(filterUsers(state.search));
+  },
   quickIssue(el){ ACTIONS.issueBook(); const b = findBook(el.dataset.id, state.books); if (b) chooseBook(b); },
   issueBook(){
     if (!isDesk()) return;
@@ -967,14 +1016,14 @@ const ACTIONS = {
       <div class="row2"><div class="field"><label for="f-issued">Issue date *</label><input class="input" id="f-issued" name="issued" type="date" value="${t}" max="${t}" data-iss="date"><span class="err" data-for="issued"></span></div>
       <div class="field"><label for="f-due">Due date (fixed ${LOAN_DAYS} days) *</label><input class="input" id="f-due" name="due" type="date" value="${addFrom(t, LOAN_DAYS)}" readonly aria-readonly="true" data-iss><span class="err" data-for="due"></span></div></div>
       <div id="iss-info" class="iss-info" aria-live="polite"></div>
-      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn" data-action="saveIssue">Issue Book</button></div>`);
+      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn" data-action="saveIssue">Issue book</button></div>`);
   },
   saveIssue(){
     if (!isDesk()) return;
     const v = readFields(), errs = issueCheck(v); showErrors(errs); if (Object.keys(errs).length) return;
     const b = findBook(v.bookId, state.books), u = findBook(v.uid, state.users), id = Math.max(0, ...state.loans.map(l => l.id)) + 1;
     const hold = heldFor(b, u.id); if (hold) hold.status = 'Collected'; else b.available--;   // a Ready hold already set the copy aside
-    state.loans.push({id, bookId:b.id, uid:u.id, borrowed:v.issued, due:v.due, by:deskName()}); notify('s' + u.id, `“${b.title}” was issued to you. Due on ${v.due}.`, 'mybooks');
+    state.loans.push({id, bookId:b.id, uid:u.id, borrowed:v.issued, due:v.due, by:deskName()}); notify('s' + u.id, `“${b.title}” was issued to you. Due on ${fmtD(v.due)}.`, 'mybooks');
     save(); render(); openModal(slipHtml(id)); toast(`✓ “${b.title}” issued to ${u.name}.`);
   },
   pickBorrower(el){ chooseBorrower(findBook(el.dataset.id, state.users)); },
@@ -1001,7 +1050,7 @@ const ACTIONS = {
   },
   rejectReg(el){
     openModal(`<h2>Reject Registration</h2><p class="sub">Tell the student why this sign-up was not approved.</p>${area('Reason','reason')}
-      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmRejectReg" data-id="${el.dataset.id}">Confirm Rejection</button></div>`, 'sm');
+      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmRejectReg" data-id="${el.dataset.id}">Confirm rejection</button></div>`, 'sm');
   },
   confirmRejectReg(el){
     if (!isDesk()) return;
@@ -1019,6 +1068,18 @@ const ACTIONS = {
       : mine.some(l => l.status === 'Overdue') ? 'Return your overdue books before placing a hold.' : mine.length + holds >= MAX_LOANS ? `Loans and holds together are limited to ${MAX_LOANS} books.` : '';
     if (bad){ toast(bad, 'red'); return; }
     const instant = b.available > 0;
+    openModal(`<h2>${instant ? 'Place hold' : 'Reserve book'}?</h2>
+      <p class="sub">${instant ? `Do you really want to place a hold on <b>“${esc(b.title)}”</b>? A copy will be set aside for you, and you must collect it at the desk within ${RESV_HOURS} hours.`
+        : `Do you really want to reserve <b>“${esc(b.title)}”</b>? All copies are out, so you will join the queue and be notified when one is ready.`}</p>
+      <div class="actions"><button class="btn gray" data-action="closeModal">No, go back</button><button class="btn ${instant ? 'ok' : 'amber'}" data-action="confirmReserveBook" data-id="${b.id}">Yes, ${instant ? 'place hold' : 'reserve'}</button></div>`, 'sm');
+  },
+  confirmReserveBook(el){
+    if (state.role !== 'student') return;
+    const b = findBook(el.dataset.id, state.books), mine = myLoans(), holds = state.resv.filter(r => r.uid === state.studentId && ['Waiting','Ready'].includes(r.status)).length;
+    const bad = !b ? 'Book not found.' : myResv(b) ? 'You already have a hold on this book.' : mine.some(l => l.bookId === b.id) ? 'You already have this book.'
+      : mine.some(l => l.status === 'Overdue') ? 'Return your overdue books before placing a hold.' : mine.length + holds >= MAX_LOANS ? `Loans and holds together are limited to ${MAX_LOANS} books.` : '';
+    if (bad){ closeModal(); toast(bad, 'red'); return; }
+    const instant = b.available > 0;
     state.resv.push({id:Math.max(0, ...state.resv.map(r => r.id)) + 1, bookId:b.id, uid:state.studentId, date:addDays(0), status:'Waiting'});
     notify('desk', `${state.user} placed a hold on “${b.title}”.`, 'reservations'); reconcile(); save(); closeModal(); render();
     toast(instant ? `✓ Hold placed on “${b.title}”. Collect it at the desk within ${RESV_HOURS} hours.` : `✓ You are in the queue for “${b.title}”. We will notify you.`);
@@ -1026,8 +1087,19 @@ const ACTIONS = {
   cancelResv(el){
     const r = findBook(el.dataset.id, state.resv); if (!r || !['Waiting','Ready'].includes(r.status)) return;
     if (!isDesk() && !(state.role === 'student' && r.uid === state.studentId)) return;
+    if (state.role === 'student'){
+      const bk = findBook(r.bookId, state.books) || findBook(r.bookId, state.archived) || {title:'this book'};
+      openModal(`<h2>Cancel reservation?</h2><p class="sub">Do you really want to cancel your ${r.status === 'Ready' ? 'hold' : 'reservation'} on <b>“${esc(bk.title)}”</b>?${r.status === 'Waiting' ? ' You will lose your place in the queue.' : ''}</p>
+        <div class="actions"><button class="btn gray" data-action="closeModal">Keep it</button><button class="btn red" data-action="confirmCancelResv" data-id="${r.id}">Yes, cancel</button></div>`, 'sm');
+      return;
+    }
+    ACTIONS.confirmCancelResv(el);
+  },
+  confirmCancelResv(el){
+    const r = findBook(el.dataset.id, state.resv); if (!r || !['Waiting','Ready'].includes(r.status)) { closeModal(); return; }
+    if (!isDesk() && !(state.role === 'student' && r.uid === state.studentId)) return;
     if (r.status === 'Ready'){ const b = findBook(r.bookId, state.books); if (b) b.available++; }
-    r.status = 'Cancelled'; save(); render(); toast('Reservation cancelled.', 'red');
+    r.status = 'Cancelled'; save(); closeModal(); render(); toast('Reservation cancelled.', 'red');
   },
   extendResv(el){ if (!isDesk()) return; const r = findBook(el.dataset.id, state.resv); r.expiresAt += 24 * 36e5; save(); render(); toast('Pickup deadline extended by 24 hours.'); },
   issueResv(el){
@@ -1068,7 +1140,7 @@ const ACTIONS = {
       ${field('ISBN','isbn')}${field('Book Title','title')}${field('Author Name','author')}
       <div class="row3">${field('Genre','genre')}${field('Edition','edition','','text','e.g. 2nd Edition')}${field('Quantity','total','','number')}</div>
       ${area('Synopsis','synopsis')}${coverPicker({})}
-      <div class="actions"><button class="btn gray" data-action="closeModal">Close</button><button class="btn" data-action="saveNewBook">${staff?'Submit for Approval':'Register Book'}</button></div>`);
+      <div class="actions"><button class="btn gray" data-action="closeModal">Close</button><button class="btn" data-action="saveNewBook">${staff?'Submit for approval':'Register book'}</button></div>`);
   },
   saveNewBook(){
     const v = readForm(), errs = validateBook(v, false); showErrors(errs);
@@ -1084,7 +1156,7 @@ const ACTIONS = {
     const b = findBook(el.dataset.id, state.books) || findBook(el.dataset.id, state.archived);
     const borrow = state.role === 'student' && state.books.includes(b) ? wishBtn(b, true) + holdBtn(b) : '';
     openModal(`<h2>Book Details: ${esc(b.title)}</h2><div class="detail">${cover(b)}${bookFacts(b)}</div>
-      ${state.role==='visitor'?'<p class="muted" style="margin-top:.8rem">Visitors can read books inside the library. Ask the librarian about a student account to borrow.</p>':''}<div class="actions">${borrow}<button class="btn" data-action="closeModal">Close</button></div>`);
+      ${state.role==='visitor'?'<p class="muted" style="margin-top:.8rem">Visitors can read books inside the library. Ask the librarian about a student account to borrow.</p>':''}<div class="actions">${borrow}<button class="btn gray" data-action="closeModal">Close</button></div>`);
   },
   editBook(el){
     const b = findBook(el.dataset.id, state.books);
@@ -1092,7 +1164,7 @@ const ACTIONS = {
     openModal(`<h2>Book Details: ${esc(b.title)}</h2><div class="detail">${cover(b)}<div class="facts">
       ${row('ISBN','isbn',b.isbn)}${row('Title','title',b.title)}${row('Author','author',b.author)}${row('Edition','edition',b.edition||'')}${row('Genre','genre',b.genre)}${row('Total Copies','total',b.total,'number')}${row('Available','available',b.available,'number')}
       <div class="syn-row"><b>Synopsis:</b><textarea class="input" name="synopsis" rows="4" maxlength="600" aria-label="Synopsis">${esc(b.synopsis||'')}</textarea><span class="err" data-for="synopsis"></span></div></div></div>
-      ${coverPicker(b)}<div class="actions"><button class="btn" data-action="saveEdit" data-id="${b.id}">Save Changes</button></div>`);
+      ${coverPicker(b)}<div class="actions"><button class="btn" data-action="saveEdit" data-id="${b.id}">Save changes</button></div>`);
   },
   saveEdit(el){
     const v = readForm(), errs = validateBook(v, true); showErrors(errs);
@@ -1106,7 +1178,7 @@ const ACTIONS = {
     openModal(`<h2>Confirm Archive: ${esc(b.title)}</h2><div class="detail">${cover(b)}<div class="facts" >
       <div><b>ISBN:</b>${esc(b.isbn)}</div><div><b>Title:</b>${esc(b.title)}</div><div><b>Author:</b>${esc(b.author)}</div><div><b>Genre:</b>${esc(b.genre)}</div>
       <p style="margin:.3rem 0"><b>Note:</b> This book will be moved to the Archive tab. You can restore it at any time. Do you wish to proceed?</p></div></div>
-      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmArchive" data-id="${b.id}">Confirm</button></div>`);
+      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmArchive" data-id="${b.id}">Archive</button></div>`);
   },
   confirmArchive(el){
     const i = state.books.findIndex(b => b.id === +el.dataset.id), [b] = state.books.splice(i, 1);
@@ -1134,7 +1206,7 @@ const ACTIONS = {
   },
   rejectRequest(el){
     openModal(`<h2>Reject Request</h2><p class="sub">Tell the staff member why this entry was rejected.</p>${area('Reason','reason')}
-      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmReject" data-id="${el.dataset.id}">Confirm Rejection</button></div>`, 'sm');
+      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmReject" data-id="${el.dataset.id}">Confirm rejection</button></div>`, 'sm');
   },
   confirmReject(el){
     const v = readFields(), r = findBook(el.dataset.id, state.requests);
@@ -1199,7 +1271,7 @@ const ACTIONS = {
   resetData(){
     openModal(`<h2>Reset Sample Data</h2><p class="sub">This restores the original books, users and loans.</p>
       <p><b>Warning:</b> Any books, users or loans you added or changed will be lost. This process cannot be reversed. Do you wish to proceed?</p>
-      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmReset">Confirm</button></div>`);
+      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmReset">Reset data</button></div>`);
   },
   confirmReset(){
     state.books = seedBooks(); state.archived = []; state.users = seedUsers(); state.loans = seedLoans(); state.requests = seedRequests(); state.visits = seedVisits(); state.regs = seedRegs(); state.resv = []; state.wish = {}; state.notes = seedNotes();
@@ -1208,14 +1280,14 @@ const ACTIONS = {
 
   /* --- User management (follows Module 2 flowchart) --- */
   addUser(){      // Enter user details
-    openModal(`<h2>Add New User</h2><p class="sub">Enter the user's details</p>${userForm()}
-      <div class="actions"><button class="btn gray" data-action="closeModal">Close</button><button class="btn" data-action="saveNewUser">Save User</button></div>`);
+    openModal(`<h2>Add user</h2><p class="sub">Enter the details below. All fields are required.</p>${userForm()}
+      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn" data-action="saveNewUser">Add user</button></div>`);
   },
   saveNewUser(){  // Validate -> Save -> "User added successfully"
     const v = readFields(), errs = validateUser(v, null); showErrors(errs);
     if (Object.keys(errs).length) return;
     state.users.push({id:Math.max(0,...state.users.map(u=>u.id))+1, sid:v.sid.trim(), name:v.name.trim(), email:v.email.trim(), phone:fmtPhone(normPhone(v.phone)), role:v.role, college:v.college});
-    save(); closeModal(); render(); toast(`✓ User “${v.name.trim()}” added successfully!`);
+    save(); closeModal(); render(); toast(`Added “${v.name.trim()}” to users.`);
   },
   viewUser(el){   // Select user -> Display profile (tabs: Profile | Loan History)
     openModal(userModal(findBook(el.dataset.id, state.users)), 'lg');
@@ -1234,25 +1306,28 @@ const ACTIONS = {
   },
   editUser(el){   // Select user -> Modify information
     const u = findBook(el.dataset.id, state.users);
-    openModal(`<h2>Update User: ${esc(u.name)}</h2><p class="sub">Modify the user's information</p>${userForm(u)}
-      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn" data-action="saveUserEdit" data-id="${u.id}">Save Changes</button></div>`);
+    openModal(`<h2>Edit user</h2><p class="sub">${esc(u.name)}</p>${userForm(u)}
+      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn" data-action="saveUserEdit" data-id="${u.id}">Save changes</button></div>`);
   },
   saveUserEdit(el){ // Save changes -> "User updated successfully"
     const u = findBook(el.dataset.id, state.users), v = readFields(), errs = validateUser(v, u.id); showErrors(errs);
     if (Object.keys(errs).length) return;
     Object.assign(u, {sid:v.sid.trim(), name:v.name.trim(), email:v.email.trim(), phone:fmtPhone(normPhone(v.phone)), role:v.role, college:v.college});
-    save(); closeModal(); render(); toast('✓ User updated successfully!');
+    save(); closeModal(); render(); toast(`Updated “${v.name.trim()}”.`);
   },
-  deleteUser(el){ // Select user -> Delete confirmation (Cancel = NO, Confirm = YES)
-    const u = findBook(el.dataset.id, state.users);
-    openModal(`<h2>Confirm Deletion: ${esc(u.name)}</h2><div class="detail">${avatar}<div class="facts" >
-      <div><b>Student ID:</b>${esc(u.sid)}</div><div><b>Name:</b>${esc(u.name)}</div><div><b>Role:</b>${esc(u.role)}</div>
-      <p style="margin:.3rem 0"><b>Warning:</b> This process cannot be reversed. Do you wish to proceed with the deletion?</p></div></div>
-      <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmDeleteUser" data-id="${u.id}">Confirm</button></div>`);
+  deleteUser(el){ // Select user -> Delete confirmation. A user who still has books out cannot be deleted.
+    const u = findBook(el.dataset.id, state.users), n = loanHistory(u.id).filter(l => !l.returned).length;
+    const who = `<div class="detail">${avatar}<div class="facts"><div><b>School ID:</b>${esc(u.sid)}</div><div><b>Name:</b>${esc(u.name)}</div><div><b>Role:</b>${esc(u.role)}</div></div></div>`;
+    openModal(n
+      ? `<h2>Delete ${esc(u.name)}?</h2>${who}<div class="alert warn"><b>${n} book${n === 1 ? ' is' : 's are'} still on loan.</b> Check ${n === 1 ? 'it' : 'them'} in before deleting this user.</div>
+        <div class="actions"><button class="btn gray" data-action="closeModal">Close</button><button class="btn" data-action="userHistory" data-id="${u.id}">View loans</button></div>`
+      : `<h2>Delete ${esc(u.name)}?</h2>${who}<p class="muted" style="margin:.8rem 0 0">This can’t be undone. Past loans stay in the records and will show as “(removed user)”.</p>
+        <div class="actions"><button class="btn gray" data-action="closeModal">Cancel</button><button class="btn red" data-action="confirmDeleteUser" data-id="${u.id}">Delete user</button></div>`);
   },
   confirmDeleteUser(el){ // Delete user -> "User deleted successfully"
+    if (loanHistory(el.dataset.id).some(l => !l.returned)) return closeModal();
     const i = state.users.findIndex(u => u.id === +el.dataset.id), [u] = state.users.splice(i, 1);
-    save(); closeModal(); render(); toast(`User “${u.name}” deleted successfully!`, 'red');
+    save(); closeModal(); render(); toast(`Deleted “${u.name}”.`, 'red');
   }
 };
 document.addEventListener('click', e => {
@@ -1277,17 +1352,46 @@ document.addEventListener('change', e => {
     im.onerror = () => { err.textContent = 'That image could not be read.'; }; im.src = rd.result; };
   rd.readAsDataURL(f);
 });
+/* ----- top-bar quick results (desk): on pages without their own list, typing shows matching books, visitors and users ----- */
+const gsClose = () => { const o = $('#gs-pop'); if (o) o.remove(); };
+function gsPop(q){
+  gsClose(); q = (q || '').trim();
+  const tb = $('.topbar'), g = $('.gsearch'); if (!q || !tb || !g || !isDesk()) return;
+  const ql = q.toLowerCase(), has = k => routes().some(r => r.key === k);
+  const books = state.books.filter(b => [b.id, b.isbn, b.title, b.author, b.genre].join(' ').toLowerCase().includes(ql)).slice(0, 4);
+  const vis = has('visitors') ? filterVisitors(q).slice(0, 3) : [], users = has('user') ? filterUsers(q).slice(0, 3) : [], regs = has('registrations') ? filterRegs(q).slice(0, 3) : [];
+  const row = (act, attrs, t, sub) => `<button type="button" class="gs-row" data-action="${act}" ${attrs}><b>${esc(t)}</b><small>${esc(sub)}</small></button>`;
+  const grp = (t, rows) => rows.length ? `<div class="gs-g">${t}</div>${rows.join('')}` : '';
+  const html = grp('Books', books.map(b => row('viewBook', `data-id="${b.id}"`, b.title, b.author)))
+    + grp('Visitors', vis.map(v => row('gsVisitor', `data-q="${esc(q)}"`, v.name, `${v.purpose} · ${v.time}`)))
+    + grp('Registrations', regs.map(r => row('gsReg', `data-q="${esc(q)}"`, r.name, `${r.sid} · ${r.status}`)))
+    + grp('Users', users.map(u => row('gsUser', `data-q="${esc(q)}"`, u.name, `${u.role}${u.college ? ' · ' + u.college : ''}`)));
+  const pop = document.createElement('div'); pop.id = 'gs-pop'; pop.className = 'gs-pop'; pop.setAttribute('role', 'listbox');
+  pop.innerHTML = html || `<div class="gs-empty">No matches for “${esc(q)}”.</div>`;
+  const a = g.getBoundingClientRect(), b = tb.getBoundingClientRect();
+  pop.style.cssText = `left:${a.left - b.left}px;top:${a.bottom - b.top + 6}px;width:${a.width}px`;
+  tb.appendChild(pop);
+}
+document.addEventListener('click', e => { if (!e.target.closest('.gsearch, #gs-pop') || e.target.closest('#gs-pop [data-action]')) gsClose(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') gsClose(); });
+Object.assign(ACTIONS, {
+  gsVisitor(el){ state.search = el.dataset.q; state.searchFor = 'visitors'; state.stFilter = ''; state.roleFilter = ''; location.hash = 'visitors'; if (currentRoute().key === 'visitors') render(); },
+  gsReg(el){ state.search = el.dataset.q; state.searchFor = 'registrations'; state.stFilter = ''; state.roleFilter = ''; location.hash = 'registrations'; if (currentRoute().key === 'registrations') render(); },
+  gsUser(el){ state.search = el.dataset.q; state.searchFor = 'user'; state.stFilter = ''; state.roleFilter = ''; location.hash = 'user'; if (currentRoute().key === 'user') render(); }
+});
 document.addEventListener('input', e => {            // live search (updates table only, keeps focus)
-  if (e.target.id === 'gsearch'){ const ps = $('#search'); if (ps){ ps.value = e.target.value; ps.dispatchEvent(new Event('input', {bubbles:true})); } return; }   // top bar drives the page's own search
+  if (e.target.id === 'gsearch'){ const ps = $('#search'); if (ps){ gsClose(); ps.value = e.target.value; ps.dispatchEvent(new Event('input', {bubbles:true})); } else gsPop(e.target.value); return; }   // top bar drives the page's own search
   if (e.target.id !== 'search') return;
-  state.search = e.target.value; const g = $('#gsearch'); if (g && g.value !== state.search) g.value = state.search;
+  state.search = e.target.value; state.searchFor = currentRoute().key; const g = $('#gsearch'); if (g && g.value !== state.search) g.value = state.search;
   const r = currentRoute();
   $('#book-list').innerHTML = r.table ? r.table(state.search) : bookTable(filterBooks(r.list(), state.search), r.actions);
 });
 document.addEventListener('keydown', e => {          // top-bar search: Enter jumps to the book list, "/" focuses it
   if (!state.user) return;
   if (e.target.id === 'gsearch' && e.key === 'Enter'){
-    e.preventDefault(); const key = isDesk() ? 'inventory' : 'browse'; state.search = e.target.value.trim(); state.stFilter = ''; state.navOpen = false;
+    e.preventDefault(); const cur = currentRoute();
+    if ((cur.list || cur.table) && $('#search')) return;           // this section's own search is already filtering live
+    const key = isDesk() ? 'inventory' : 'browse'; state.search = e.target.value.trim(); state.searchFor = key; state.stFilter = ''; state.roleFilter = ''; state.navOpen = false;
     if (location.hash.slice(1) === key) render(); else location.hash = key;
   } else if (e.key === '/' && !e.target.closest('input,textarea,select,[contenteditable]') && !document.querySelector('#modal-root .modal')){
     const g = $('#gsearch'); if (g){ e.preventDefault(); g.focus(); }
@@ -1305,15 +1409,20 @@ const rulesFor = () => [
   {ico:'user', who:'student', t:'Your account', items:['A librarian verifies every new registration before you can log in.','Keep your password private. You are responsible for activity on your account.']},
   {ico:'check', t:'Everyone', items:['Keep quiet, and keep food and drinks outside.','Treat books and library property with care.','The time you accept these rules is saved with your registration or visit.']}
 ];
-const ruleCard = (r, k) => `<section class="rule ${r.who === k ? 'hl' : ''}"><h3><span class="rule-ico" aria-hidden="true">${I[r.ico]}</span><span class="rule-t">${r.t}</span>${r.who === k ? '<span class="badge">Applies to you</span>' : ''}</h3><ul>${r.items.map(x => `<li>${x}</li>`).join('')}</ul></section>`;
+const ruleCard = (r, k, flag = true) => `<section class="rule ${flag && r.who === k ? 'hl' : ''}"><h3><span class="rule-ico" aria-hidden="true">${I[r.ico]}</span><span class="rule-t">${r.t}</span>${flag && r.who === k ? '<span class="badge">Applies to you</span>' : ''}</h3><ul>${r.items.map(x => `<li>${x}</li>`).join('')}</ul></section>`;
 function pageRules(){
-  const k = state.role === 'student' ? 'student' : 'visitor';
-  return `<div class="page-head"><div class="ph-t"><h2>Library Rules &amp; Terms</h2><p>What to expect when you use the library.</p></div></div>
-    <div class="rules-grid">${rulesFor().map(r => ruleCard(r, k)).join('')}</div>
-    <p class="muted" style="margin-top:1rem">Questions? Ask the librarian at the desk or call (+63) 1234-5678.</p>`;
+  const desk = isDesk(), k = state.role === 'student' ? 'student' : 'visitor', all = rulesFor();
+  const mine = all.filter(r => !r.who || r.who === k).sort((a, b) => !!b.who - !!a.who), other = all.filter(r => r.who && r.who !== k);
+  const cols = n => n === 1 ? 1 : n % 3 === 0 ? 3 : 2;
+  const grid = (list, cls = '') => `<div class="rules-grid ${cls}" style="--cols:${cols(list.length)}">${list.map(r => ruleCard(r, k, false)).join('')}</div>`;
+  const head = `<div class="page-head"><div class="ph-t"><h2>Library Rules &amp; Terms</h2><p>${desk ? 'The rules every visitor and student agrees to. Use them as your reference at the desk.' : 'What to expect when you use the library.'}</p></div></div>`;
+  const body = desk ? grid([...all].sort((a, b) => !a.who - !b.who), 'desk')
+    : `<h3 class="rules-h">Rules for you</h3>${grid(mine)}${other.length ? `<h3 class="rules-h sub">Also good to know · for ${k === 'student' ? 'visitors' : 'students'}</h3>${grid(other)}` : ''}`;
+  return `${head}${body}${desk ? '' : '<p class="muted rules-foot">Questions? Ask the librarian at the desk or call (+63) 1234-5678.</p>'}`;
 }
 const RULES_ROUTE = {key:'rules', label:'Library Rules', title:() => 'Library Rules', render:pageRules};
 STUDENT_ROUTES.splice(STUDENT_ROUTES.length - 1, 0, RULES_ROUTE); VISITOR_ROUTES.push(RULES_ROUTE);
+insertAfter(ROUTES, 'visitors', RULES_ROUTE); insertAfter(STAFF_ROUTES, 'visitors', RULES_ROUTE);   // the desk can read the rules too
 Object.assign(I, {rules:'<svg viewBox="0 0 24 24"><path d="M9 4h6v3H9z"/><path d="M7 5.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6.5a1 1 0 0 0-1-1h-1M8.5 14l2.5 2.5 4.5-5"/></svg>', sun:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></svg>', moon:'<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>'});
 NAV_ICON.rules = 'rules';
 
@@ -1367,21 +1476,21 @@ function rtDetail(l){
   const i = loanInfo(l), b = bookOf(l.bookId), u = findBook(l.uid, state.users) || {name:'(removed user)', sid:'—', phone:'', role:'—', college:''};
   const late = i.status === 'Overdue', held = Math.round((new Date(addDays(0)) - new Date(l.borrowed)) / 864e5);
   const sub = late ? `${plural(i.days, 'day')} past the due date · fine ₱${i.fine.toFixed(2)}` : i.days === 0 ? 'Due today' : `${plural(-i.days, 'day')} before the due date`;
-  return `<div class="card rt-card"><div class="rt-status ${late ? 'overdue' : 'ontime'}" role="status"><span class="rt-ico" aria-hidden="true">${late ? I.alert : I.check}</span><div><b>${late ? 'Overdue' : 'On Time'}</b><small>${sub}</small></div></div>
+  return `<div class="card rt-card"><div class="rt-status ${late ? 'overdue' : 'ontime'}" role="status"><span class="rt-ico" aria-hidden="true">${late ? I.alert : I.check}</span><div><b>${late ? 'Overdue' : 'On time'}</b><small>${sub}</small></div></div>
     <div class="rt-sec"><h4>Book</h4><div class="rt-person">${thumb(b)}<div><b>${esc(b.title)}</b><small>${esc(b.author)} · ID ${b.id} · ISBN ${esc(b.isbn || '—')}</small></div></div></div>
     <div class="rt-sec"><h4>Borrower</h4><div class="rt-person"><span class="ini">${esc(initials(u.name))}</span><div><b>${esc(u.name)}</b><small>${esc(u.sid)} · ${esc(u.role || 'Student')}${u.college ? ' · ' + esc(u.college) : ''}</small><small>${esc(u.phone || 'No contact number')}</small></div></div></div>
-    <div class="rt-sec"><h4>Loan</h4><div class="rt-dates"><div><small>Issued</small><b>${l.borrowed}</b></div><div><small>Due</small><b>${l.due}</b></div><div><small>Today</small><b>${addDays(0)}</b></div><div><small>Held for</small><b>${plural(held, 'day')}</b></div></div>
-      <p class="muted" style="margin-top:.6rem">Loan period: ${LOAN_DAYS} Days · Late fine: ₱${FINE_PER_DAY} per day</p></div>
-    <div class="actions"><button class="btn gray" data-action="rtCancel">Cancel</button><button class="btn ok" data-action="rtConfirm" data-id="${l.id}">${I.check} Confirm Return</button></div></div>`;
+    <div class="rt-sec"><h4>Loan</h4><div class="rt-dates"><div><small>Issued</small><b>${fmtD(l.borrowed)}</b></div><div><small>Due</small><b>${fmtD(l.due)}</b></div><div><small>Today</small><b>${fmtD(addDays(0))}</b></div><div><small>Held for</small><b>${plural(held, 'day')}</b></div></div>
+      <p class="muted" style="margin-top:.6rem">Loan period: ${LOAN_DAYS} days · Late fine: ₱${FINE_PER_DAY} per day</p></div>
+    <div class="actions"><button class="btn gray" data-action="rtCancel">Cancel</button><button class="btn ok" data-action="rtConfirm" data-id="${l.id}">${I.check} Confirm return</button></div></div>`;
 }
 function rtResult(){
   const r = state.rt || {};
   if (r.done){ const d = r.done; return `<div class="card rt-done" role="status"><span class="rt-ico" aria-hidden="true">${I.check}</span><h3>Return recorded</h3><p><b>${esc(d.title)}</b><br>from ${esc(d.name)}</p>
-    <span class="status ${d.late ? 's-Overdue' : 's-OnTime'}">${d.late ? 'Overdue' : 'On Time'}</span>${d.fine ? `<p class="muted">Fine due: ₱${d.fine.toFixed(2)} (${plural(d.days, 'day')} late)</p>` : ''}
-    <div class="actions" style="justify-content:center"><button class="btn" data-action="rtCancel">${I.scan} Scan Next Book</button></div></div>`; }
+    <span class="status ${d.late ? 's-Overdue' : 's-OnTime'}">${d.late ? 'Returned late' : 'Returned on time'}</span>${d.fine ? `<p class="muted">Fine due: ₱${d.fine.toFixed(2)} (${plural(d.days, 'day')} late)</p>` : ''}
+    <div class="actions" style="justify-content:center"><button class="btn" data-action="rtCancel">${I.scan} Scan next book</button></div></div>`; }
   if (r.msg) return `<div class="card"><div class="alert warn" style="margin:0">${esc(r.msg)}</div></div>`;
   if (r.pick) return `<div class="card rt-card"><h3>${r.pick.length} copies are on loan</h3><p class="muted">Choose the borrower returning this copy.</p>${r.pick.map(id => { const l = state.loans.find(x => x.id === id), i = loanInfo(l), u = findBook(l.uid, state.users) || {name:'(removed user)', sid:'—'};
-    return `<button type="button" class="res" data-action="rtPick" data-id="${id}" style="width:100%;margin-top:.3rem"><span><b>${esc(u.name)}</b><small>${esc(u.sid)} · due ${l.due}</small></span><span class="status ${i.status === 'Overdue' ? 's-Overdue' : 's-OnTime'}">${i.status === 'Overdue' ? 'Overdue' : 'On Time'}</span></button>`; }).join('')}</div>`;
+    return `<button type="button" class="res" data-action="rtPick" data-id="${id}" style="width:100%;margin-top:.3rem"><span><b>${esc(u.name)}</b><small>${esc(u.sid)} · due ${fmtD(l.due)}</small></span><span class="status ${i.status === 'Overdue' ? 's-Overdue' : 's-OnTime'}">${i.status === 'Overdue' ? 'Overdue' : 'On Time'}</span></button>`; }).join('')}</div>`;
   const l = r.loanId && state.loans.find(x => x.id === r.loanId && isActive(x)); if (l) return rtDetail(l);
   return `<div class="card rt-empty">${I.scan}<p style="margin:0"><b>Ready to scan</b></p><p class="muted">Scan a barcode or type a Book ID / ISBN. The borrower and return status will appear here.</p></div>`;
 }
@@ -1392,13 +1501,13 @@ function pageReturn(){
   const Q = [...A].sort((a, b) => a.l.due.localeCompare(b.l.due)).slice(0, 6);
   const R = state.loans.filter(l => l.returned).sort((a, b) => b.returned.localeCompare(a.returned) || b.id - a.id).slice(0, 5);
   return `<div class="page-head"><div class="ph-t"><h2>Book Returns</h2><p>Check books back in. Status follows the ${LOAN_DAYS}-day loan policy.</p></div></div>${kpiCards(kpi)}
-  <div class="rt-grid"><div class="card rt-scan"><h3>Scan or enter a book</h3><div class="scan-in"><label class="search">${I.scan}<input id="rt-q" type="search" placeholder="Book ID or ISBN" autocomplete="off" aria-label="Book ID or ISBN" value="${esc((state.rt || {}).q || '')}"></label><button class="btn" data-action="rtScan">Find Loan</button></div>
+  <div class="rt-grid"><div class="card rt-scan"><h3>Scan or enter a book</h3><div class="scan-in"><label class="search">${I.scan}<input id="rt-q" type="search" placeholder="Book ID or ISBN" autocomplete="off" aria-label="Book ID or ISBN" value="${esc((state.rt || {}).q || '')}"></label><button class="btn" data-action="rtScan">Find loan</button></div>
       <small class="hint-l">A barcode scanner types the code and presses <kbd>Enter</kbd> for you.</small></div>
     <div class="rt-resw" id="rt-result" aria-live="polite">${rtResult()}</div>
     <div class="card rt-queue"><h3>On loan now</h3>${Q.length ? Q.map(x => { const b = bookOf(x.l.bookId), u = findBook(x.l.uid, state.users) || {name:'(removed user)'};
-      return `<button type="button" class="res" data-action="rtPick" data-id="${x.l.id}"><span class="res-l">${thumb(b)}<span><b>${esc(b.title)}</b><small>${esc(u.name)} · due ${x.l.due}</small></span></span><span class="status ${x.status === 'Overdue' ? 's-Overdue' : 's-OnTime'}">${x.status === 'Overdue' ? 'Overdue' : 'On Time'}</span></button>`; }).join('') : '<p class="muted">No books are on loan.</p>'}</div></div>
+      return `<button type="button" class="res" data-action="rtPick" data-id="${x.l.id}"><span class="res-l">${thumb(b)}<span><b>${esc(b.title)}</b><small>${esc(u.name)} · due ${fmtD(x.l.due)}</small></span></span><span class="status ${x.status === 'Overdue' ? 's-Overdue' : x.status === 'Borrowed' ? 's-OnTime' : 's-Late'}">${x.status === 'Borrowed' ? plural(-x.days, 'day') + ' left' : stLabel(x)}</span></button>`; }).join('') : '<p class="muted">No books are on loan.</p>'}</div></div>
   <h3 class="section-title">Recent returns</h3><div class="card flush"><div class="table-wrap">${R.length ? `<table><thead><tr><th class="cell-l">Book</th><th>Borrower</th><th>Returned</th><th>Status</th><th>Fine</th></tr></thead><tbody>${R.map(l => { const late = l.returned > l.due, u = findBook(l.uid, state.users) || {name:'(removed user)'};
-      return `<tr><td class="cell-l">${esc(bookOf(l.bookId).title)}</td><td>${esc(u.name)}</td><td>${l.returned}</td><td><span class="status ${late ? 's-Overdue' : 's-OnTime'}">${late ? 'Overdue' : 'On Time'}</span></td><td>${l.fine ? '₱' + l.fine.toFixed(2) : '—'}</td></tr>`; }).join('')}</tbody></table>` : '<div class="empty">No returns yet.</div>'}</div></div>`;
+      return `<tr><td class="cell-l">${esc(bookOf(l.bookId).title)}</td><td>${esc(u.name)}</td><td>${fmtD(l.returned)}</td><td><span class="status ${late ? 's-Late' : 's-OnTime'}">${late ? 'Returned late' : 'Returned'}</span></td><td>${l.fine ? '₱' + l.fine.toFixed(2) : '—'}</td></tr>`; }).join('')}</tbody></table>` : '<div class="empty">No returns yet.</div>'}</div></div>`;
 }
 Object.assign(ACTIONS, {
   showTerms(el){
@@ -1435,26 +1544,47 @@ window.addEventListener('hashchange', () => { if (state.user) render(); });
 
 load(); fillBookDetails(); const SP = Object.fromEntries(seedUsers().map(s => [s.sid, s.phone])); state.users.forEach(u => { u.college = u.college || ['CICS','CAS'][u.id % 2]; u.phone = u.phone || SP[u.sid] || ''; }); render();
 
-/* ----- table column alignment: counts centered, money + action columns right, everything else left (header always matches its cells) ----- */
+/* ----- table column alignment: header + cells centered in every table; columns that pair a cover/avatar with text stay left so the pair reads naturally ----- */
 (function(){
-  const NUM = /^[−-]?\d[\d,]*(\.\d+)?%?$/, MON = /^[−-]?[₱$]\s?\d[\d,]*(\.\d+)?$/, ACT = /^(actions?|review|return|cancel|view|hold|remove|edit|delete)$/i;
-  const CLS = ['col-l','col-num','col-money','col-act'];
+  const CLS = ['col-l','col-c','col-num','col-money','col-act'];
   function align(t){
     const ths = [...t.querySelectorAll('thead tr:last-child > th')]; if (!ths.length) return;
     const rows = [...t.querySelectorAll('tbody > tr')].filter(r => ![...r.children].some(c => c.colSpan > 1));
     ths.forEach((th, i) => {
       const cells = rows.map(r => r.children[i]).filter(Boolean);
-      const vals = cells.map(c => c.textContent.replace(/\s+/g, ' ').trim()).filter(v => v && v !== '—' && v !== '-');
-      let cls = 'col-l';
-      if (cells.length && cells.every(c => c.querySelector('button')) && ACT.test(th.textContent.trim())) cls = 'col-act';
-      else if (vals.length && !cells.some(c => c.querySelector('.bar'))){
-        if (vals.every(v => NUM.test(v) || MON.test(v))) cls = vals.some(v => MON.test(v)) ? 'col-money' : 'col-num';
-      }
+      const composite = cells.some(c => c.classList.contains('cell-l') || c.querySelector('.cv, .thumb, .t-cell, .ini, .avatar, img'));
+      const cls = composite ? 'col-l' : 'col-c';
       [th, ...cells].forEach(c => { if (!c.classList.contains(cls)){ c.classList.remove(...CLS); c.classList.add(cls); } });
     });
   }
   let q = 0;
-  const run = () => { q = 0; document.querySelectorAll('table').forEach(align); };
+  const run = () => { q = 0; document.querySelectorAll('table:not([data-align="manual"])').forEach(align); };
   new MutationObserver(() => { if (!q) q = requestAnimationFrame(run); }).observe(document.body, {childList:true, subtree:true});
   run();
 })();
+
+/* ----- keep date-driven content fresh: when the day changes (tab left open overnight), re-render so the heading and overdue figures update ----- */
+(function(){
+  let day = new Date().toDateString();
+  const tick = () => {
+    const now = new Date().toDateString(); if (now === day) return; day = now;
+    const a = document.activeElement;
+    if (state.user && !$('#modal-root').firstElementChild && !(a && a.matches('input,textarea,select'))) render();
+  };
+  setInterval(tick, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+})();
+/* ----- arrow keys move between tabs in every tablist (login roles, settings, profile) ----- */
+document.addEventListener('keydown', e => {
+  const tab = e.target.closest && e.target.closest('[role="tab"]');
+  if (!tab || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)) return;
+  const list = tab.closest('[role="tablist"]'); if (!list) return;
+  const tabs = [...list.querySelectorAll('[role="tab"]')], i = tabs.indexOf(tab); if (i < 0) return;
+  const prev = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+  const n = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (i + (prev ? -1 : 1) + tabs.length) % tabs.length;
+  e.preventDefault();
+  const label = list.getAttribute('aria-label') || '';
+  tabs[n].click();                                   // pages re-render, so find the same tab again and keep focus on it
+  const again = [...document.querySelectorAll('[role="tablist"]')].find(l => (l.getAttribute('aria-label') || '') === label);
+  const t = again && again.querySelectorAll('[role="tab"]')[n]; if (t) t.focus();
+});
