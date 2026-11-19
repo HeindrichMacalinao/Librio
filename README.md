@@ -81,7 +81,3 @@ Librio/
 ## 🛠️ Tech Stack
 
 HTML5 · CSS3 (custom properties for theming) · Vanilla JavaScript (ES modules) · Web Storage API
-
-## 👤 Author
-
-**Heindrich Macalinao** · [@HeindrichMacalinao](https://github.com/HeindrichMacalinao)
